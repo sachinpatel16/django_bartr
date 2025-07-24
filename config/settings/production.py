@@ -11,6 +11,8 @@ ADMINS = env.json('ADMINS')
 # Database
 # https://docs.djangoproject.com/en/2.2/ref/settings/#databases
 
+INSTALLED_APPS += ["storages"]
+
 DATABASES = {
     'default': {
         'ENGINE': env('ENGINE'),
