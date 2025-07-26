@@ -35,7 +35,7 @@ from freelancing.custom_auth.serializers import (BaseUserSerializer,
                                                 UserPhotoSerializer,
                                                 UserStatisticSerializerMixin,
                                                 CustomPermissionSerializer, SendPasswordResetEmailSerializer,
-                                                UserPasswordResetSerializer, MerchantProfileSerializer
+                                                UserPasswordResetSerializer, MerchantProfileSerializer, WalletSerializer
                                             
                                             )
 # from trade_time_accounting.notification.FCM_manager import unsubscribe_from_topic
@@ -491,3 +491,26 @@ class MerchantProfileViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         # Automatically assign logged-in user
         serializer.save(user=self.request.user)
+
+class WalletViewSet(viewsets.ModelViewSet):
+    queryset = Wallet.objects.all()
+    serializer_class = WalletSerializer
+    permission_classes = [
+        permissions.IsAuthenticated,
+        IsAPIKEYAuthenticated,
+    ]
+    authentication_classes = [JWTAuthentication]
+    filter_backends = (DjangoFilterBackend, SearchFilter)
+
+    def get_queryset(self):
+        user = self.request.user
+        user_ct = ContentType.objects.get_for_model(user.__class__)
+        return Wallet.objects.filter(content_type=user_ct, object_id=user.uuid)
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        user_ct = ContentType.objects.get_for_model(user.__class__)
+        serializer.save(content_type=user_ct, object_id=user.uuid)
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({"detail": "Wallet cannot be deleted manually."}, status=status.HTTP_403_FORBIDDEN)

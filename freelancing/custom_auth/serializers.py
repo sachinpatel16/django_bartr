@@ -6,7 +6,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from rest_framework.serializers import ModelSerializer
 
-from freelancing.custom_auth.models import ApplicationUser, CustomPermission, MerchantProfile
+from freelancing.custom_auth.models import ApplicationUser, CustomPermission, MerchantProfile, Wallet
 from freelancing.utils.validation import UniqueNameMixin
 
 from freelancing.utils.email_send import Util
@@ -272,3 +272,22 @@ class MerchantProfileSerializer(serializers.ModelSerializer):
             'city',
             'state',
         ]
+
+class WalletSerializer(serializers.ModelSerializer):
+    owner_type = serializers.CharField(source='content_type.model', read_only=True)
+    owner_id = serializers.UUIDField(source='object_id')
+    owner_repr = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Wallet
+        fields = [
+            'id',
+            'balance',
+            'owner_type',
+            'owner_id',
+            'owner_repr',
+            'updated_at',
+        ]
+
+    def get_owner_repr(self, obj):
+        return str(obj.content_object)

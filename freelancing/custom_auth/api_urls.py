@@ -13,6 +13,8 @@ router.register("v1/custom_permission", api.CustomPermissionViewSet, basename="c
 #Merchant Profile
 router.register("v1/merchant_profile", api.MerchantProfileViewSet, basename="merchant_profile")
 
+#Wallet
+router.register("v1/wallet", api.WalletViewSet, basename="wallet")
 app_name = "custom-auth"
 
 urlpatterns = [
