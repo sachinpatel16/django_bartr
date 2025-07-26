@@ -6,7 +6,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from rest_framework.serializers import ModelSerializer
 
-from freelancing.custom_auth.models import ApplicationUser, CustomPermission
+from freelancing.custom_auth.models import ApplicationUser, CustomPermission, MerchantProfile
 from freelancing.utils.validation import UniqueNameMixin
 
 from freelancing.utils.email_send import Util
@@ -72,7 +72,8 @@ class BaseUserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ("id", "uuid", "fullname", "email", "phone", "photo", "gender", "is_merchant",
+        fields = ("id", "uuid", "phone", "fullname", "first_name","last_name", "last_name", "email", 
+                    "photo", "gender", "is_merchant", "address", "area", "pin", "city", "state",
                     "password", "is_active")
         read_only_fields = ("uuid",)
         ref_name = "BaseUserSerializer_ref"
@@ -118,57 +119,6 @@ class PasswordValidationSerializer(serializers.Serializer):
         except DjangoValidationError as ex:
             raise ValidationError(ex.messages)
         return password
-
-
-# class BaseUserSerializer(serializers.ModelSerializer):
-#     photo = serializers.SerializerMethodField()
-#     password = serializers.CharField(write_only=True)
-#     kitchen = serializers.SerializerMethodField()
-#     outlet = serializers.SerializerMethodField()
-#     user_permission = serializers.SerializerMethodField()
-
-#     class Meta:
-#         model = User
-#         fields = ("id", "uuid", "fullname", "email", "phone", "photo", "address", "gender",
-#                   "password", "kitchen", "outlet", "is_active", "user_type_name", "user_permission")
-#         read_only_fields = ("uuid",)
-#         ref_name = "BaseUserSerializer_ref"
-        
-#     def get_photo(self, obj):
-#         photo = obj.photo
-#         if not photo:
-#             return
-#         return UserPhotoSerializer(obj).data
-
-#     def get_user_permission(self, obj):
-#         from foodasso.user_management.serializers import AdminUserAccessPermissionSerializer
-#         user_permissions = AdminUserAccessPermission.objects.filter(user=obj)
-#         return AdminUserAccessPermissionSerializer(user_permissions, many=True).data
-
-#     def get_kitchen(self, obj):
-#         try:
-#             return Kitchen.objects.filter(outlet__user=obj, kitchen_type='central').first().id
-#         except:
-#             return None
-
-#     def get_user_type_name(self, obj):
-#         return obj.user_type.type if obj.user_type else ''
-
-#     def get_outlet(self, obj):
-#         try:
-#             return Outlet.objects.filter(user=obj).first().id
-#         except:
-#             return None
-
-#     def save(self, **kwargs):
-#         password = self.validated_data.pop("password", None)
-#         user = super().save(**kwargs)
-
-#         if password:
-#             user.set_password(password)
-#             user.save(update_fields=["password"])
-
-#         return user
 
 
 class UserStatisticSerializerMixin:
@@ -303,3 +253,22 @@ class UserPasswordResetSerializer(serializers.Serializer):
             PasswordResetTokenGenerator().check_token(user, token)
             raise serializers.ValidationError("Token is not Valide or Expier")
 
+
+class MerchantProfileSerializer(serializers.ModelSerializer):
+    user_id = serializers.IntegerField(source='user.id', read_only=True)       # User's integer ID
+    user_uuid = serializers.UUIDField(source='user.uuid', read_only=True)      # User's UUID
+
+    class Meta:
+        model = MerchantProfile
+        fields = [
+            'id',
+            'user_id',
+            'user_uuid',
+            'business_name',
+            'gst_number',
+            'address',
+            'area',
+            'pin',
+            'city',
+            'state',
+        ]

@@ -2,12 +2,14 @@ from django.contrib import admin
 from django.db.models import BooleanField, Case, Value, When
 
 from freelancing.custom_auth.models import (ApplicationUser, MultiToken,
-                                            UserActivity, CustomPermission)
+                                            UserActivity, CustomPermission, MerchantProfile, Wallet)
 
 # Register your models here.
 # admin.site.register(MultiToken)
 # admin.site.register()
 admin.site.register(UserActivity)
+admin.site.register(MerchantProfile)
+admin.site.register(Wallet)
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model

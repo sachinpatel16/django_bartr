@@ -9,6 +9,8 @@ from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from django.utils.translation import gettext_lazy as _
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from model_utils import Choices
 from phonenumber_field.modelfields import PhoneNumberField
 from rest_framework.authtoken.models import Token
@@ -77,7 +79,7 @@ class ApplicationUser(AbstractBaseUser, UserPhotoMixin, PermissionsMixin):
     username = models.CharField(
         _("username"),
         max_length=150,
-        unique=True,
+        # unique=True,
         blank=True,
         null=False,  
         default="",
@@ -167,7 +169,12 @@ class ApplicationUser(AbstractBaseUser, UserPhotoMixin, PermissionsMixin):
         help_text=_('Designates whether the user is a merchant.'),
     )
 
-    
+    address = models.TextField(_("Address"), null=True, blank=True)
+    area = models.CharField(_("Area"), max_length=256, null=True, blank=True)
+    pin = models.CharField(_("PIN Code"), max_length=10, null=True, blank=True)
+    city = models.CharField(_("City"), max_length=100, null=True, blank=True)
+    state = models.CharField(_("State"), max_length=100, null=True, blank=True)
+
     # address = models.TextField(_("Address"), null=True, blank=True)
     # partnership = models.BooleanField(default=False)
     # percentage = models.PositiveIntegerField(default=0)
@@ -234,6 +241,30 @@ class ApplicationUser(AbstractBaseUser, UserPhotoMixin, PermissionsMixin):
         if self.username is None:
             self.username = None  # ensure it's explicitly set
 
+
+class MerchantProfile(BaseModel):
+    user = models.OneToOneField(ApplicationUser, on_delete=models.CASCADE, related_name='merchant_profile')
+    address = models.TextField(_("Address"), null=True, blank=True)
+    area = models.CharField(_("Area"), max_length=256, null=True, blank=True)
+    pin = models.CharField(_("PIN Code"), max_length=10, null=True, blank=True)
+    city = models.CharField(_("City"), max_length=100, null=True, blank=True)
+    state = models.CharField(_("State"), max_length=100, null=True, blank=True)
+    business_name = models.CharField(max_length=255)
+    gst_number = models.CharField(max_length=20, null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.business_name} ({self.user.email})"
+
+
+class Wallet(models.Model):
+    balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.UUIDField()
+    content_object = GenericForeignKey('content_type', 'object_id')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Wallet of {self.content_object} - ₹{self.balance}"
 
 
 class LoginOtp(BaseModel):

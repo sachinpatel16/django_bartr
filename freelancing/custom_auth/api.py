@@ -9,6 +9,7 @@ from django.contrib.sites.shortcuts import get_current_site
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.translation import gettext as _
+from django.contrib.contenttypes.models import ContentType
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
@@ -25,7 +26,7 @@ from rest_framework_simplejwt.tokens import RefreshToken # type: ignore
 from templated_email import send_templated_mail
 
 from freelancing.custom_auth.models import (ApplicationUser, LoginOtp, CustomBlacklistedToken,
-                                         CustomPermission)
+                                         CustomPermission, Wallet, MerchantProfile)
 from freelancing.custom_auth.permissions import IsSelf
 from freelancing.custom_auth.serializers import (BaseUserSerializer,
                                                 ChangePasswordSerializer,
@@ -34,7 +35,7 @@ from freelancing.custom_auth.serializers import (BaseUserSerializer,
                                                 UserPhotoSerializer,
                                                 UserStatisticSerializerMixin,
                                                 CustomPermissionSerializer, SendPasswordResetEmailSerializer,
-                                                UserPasswordResetSerializer
+                                                UserPasswordResetSerializer, MerchantProfileSerializer
                                             
                                             )
 # from trade_time_accounting.notification.FCM_manager import unsubscribe_from_topic
@@ -463,3 +464,30 @@ class UserPasswordResetView(APIView):
                 {"msg": "Password Reset Succesfully"}, status=status.HTTP_200_OK
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# MerchantProfileViewSet
+
+
+# Create your views here.
+class MerchantProfileViewSet(viewsets.ModelViewSet):
+    queryset = MerchantProfile.objects.all()
+    serializer_class = MerchantProfileSerializer
+    permission_classes = [
+        permissions.IsAuthenticated,
+        IsAPIKEYAuthenticated,
+    ]
+    authentication_classes = [JWTAuthentication]
+    filter_backends = (DjangoFilterBackend, SearchFilter)
+    # search_fields = ["user__phone"]
+    # ordering = [""]
+
+    def get_queryset(self):
+        # If superuser/admin — return all, else return only current user's merchant profile
+        user = self.request.user
+        if user.is_superuser:
+            return MerchantProfile.objects.all()
+        return MerchantProfile.objects.filter(user=user)
+
+    def perform_create(self, serializer):
+        # Automatically assign logged-in user
+        serializer.save(user=self.request.user)

@@ -10,6 +10,9 @@ router.register("v1/auth", api.UserAuthViewSet, basename="auth")
 router.register("v1/users", api.UserViewSet, basename="users")
 router.register("v1/custom_permission", api.CustomPermissionViewSet, basename="custom_permission")
 
+#Merchant Profile
+router.register("v1/merchant_profile", api.MerchantProfileViewSet, basename="merchant_profile")
+
 app_name = "custom-auth"
 
 urlpatterns = [
