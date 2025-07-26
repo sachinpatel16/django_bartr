@@ -57,6 +57,8 @@ else:
 STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/freelancing/static/"
 MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/freelancing/media/"
 
+STATIC_ROOT = ''  # Don't use STATIC_ROOT if not using collectstatic
+STATICFILES_DIRS = []  # Empty if no local static folder
 
 DEFAULT_FILE_STORAGE = 'config.settings.s3utils.MediaRootS3BotoStorage'
 STATICFILES_STORAGE = 'config.settings.s3utils.StaticRootS3BotoStorage'
