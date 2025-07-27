@@ -11,6 +11,7 @@ from freelancing.custom_auth.models import (ApplicationUser, MultiToken,
 admin.site.register(UserActivity)
 admin.site.register(MerchantProfile)
 admin.site.register(Wallet)
+admin.site.register(Category)
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
