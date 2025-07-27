@@ -230,12 +230,21 @@ class ApplicationUser(AbstractBaseUser, UserPhotoMixin, PermissionsMixin):
         super(ApplicationUser, self).save(*args, **kwargs)
 
     def assign_first_last_name_to_the_object(self):
-        fullname = self.fullname.split(" ")
-        self.first_name = fullname[0]
-        if len(fullname) > 1:
-            self.last_name = fullname[1]
+        if not self.fullname or not self.fullname.strip():
+            return
+            
+        fullname_parts = self.fullname.strip().split(" ")
+        # Filter out empty strings that might result from multiple spaces
+        fullname_parts = [part for part in fullname_parts if part]
+        
+        if not fullname_parts:
+            return
+            
+        self.first_name = fullname_parts[0]
+        if len(fullname_parts) > 1:
+            self.last_name = fullname_parts[1]
         else:
-            self.last_name = fullname[0]
+            self.last_name = fullname_parts[0]
 
     def update_last_activity(self):
         now = timezone.now()
@@ -248,17 +257,47 @@ class ApplicationUser(AbstractBaseUser, UserPhotoMixin, PermissionsMixin):
         if self.username is None:
             self.username = None  # ensure it's explicitly set
 
+class Category(BaseModel):
+    name = models.CharField(_("Category Name"), max_length=100, unique=True)
+    description = models.TextField(_("Description"), blank=True, null=True)
 
+    class Meta:
+        verbose_name = _("Category")
+        verbose_name_plural = _("Categories")
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+    
 class MerchantProfile(BaseModel):
     user = models.OneToOneField(ApplicationUser, on_delete=models.CASCADE, related_name='merchant_profile')
+    category = models.ForeignKey(
+        'Category',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='merchants'
+    )
+    
+    business_name = models.CharField(max_length=255)
+    email = models.EmailField(_("Merchant Email"), null=True, blank=True)
+    phone = PhoneNumberField(_("Merchant Phone"), null=True, blank=True)
+    gender = models.CharField(max_length=10, choices=[("male", "Male"), ("female", "Female"), ("others", "Others")], null=True, blank=True)
+    
+    gst_number = models.CharField(max_length=20, null=True, blank=True)
+    fssai_number = models.CharField(max_length=20, null=True, blank=True)
+    
     address = models.TextField(_("Address"), null=True, blank=True)
     area = models.CharField(_("Area"), max_length=256, null=True, blank=True)
     pin = models.CharField(_("PIN Code"), max_length=10, null=True, blank=True)
     city = models.CharField(_("City"), max_length=100, null=True, blank=True)
     state = models.CharField(_("State"), max_length=100, null=True, blank=True)
-    business_name = models.CharField(max_length=255)
-    gst_number = models.CharField(max_length=20, null=True, blank=True)
 
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+
+    logo = models.ImageField(upload_to="merchant/logo/", null=True, blank=True)
+    banner_image = models.ImageField(upload_to="merchant/banner/", null=True, blank=True)
     def __str__(self):
         return f"{self.business_name} ({self.user.email})"
 

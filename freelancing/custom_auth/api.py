@@ -11,6 +11,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.contrib.contenttypes.models import ContentType
 from django_filters.rest_framework import DjangoFilterBackend
+from django.db import IntegrityError
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
@@ -181,7 +182,7 @@ class UserViewSet(viewsets.ModelViewSet):
         # IsReadAction | IsSelf,
     ]
     authentication_classes = [JWTAuthentication]
-    lookup_field = "uuid"
+    # lookup_field = "uuid"
     filter_backends = (DjangoFilterBackend, SearchFilter)
     search_fields = ["fullname"]
     ordering = ["fullname"]
@@ -228,13 +229,33 @@ class UserViewSet(viewsets.ModelViewSet):
 
         return serializer_class
 
+    # def get_queryset(self):
+    #     user = self.request.user
+    #     return self.queryset.filter(id=user.id)
+    # def get_queryset(self):
+    #     user = self.request.user
+    #     if user.is_superuser:
+    #         return User.objects.all()
+    #     return User.objects.filter(user=user)
     def get_queryset(self):
         queryset = super().get_queryset()
-
-        if "with_statistics" in self.request.query_params:
-            queryset = queryset.with_statistic()
-
         return queryset
+
+    @action(
+        detail=False,
+        methods=["get", "put", "patch"],
+        url_path="me",
+        permission_classes=[permissions.IsAuthenticated, IsAPIKEYAuthenticated, IsSelf]
+        )
+    def me(self, request):
+        if request.method in ["PUT", "PATCH"]:
+            serializer = self.get_serializer(request.user, data=request.data, partial=(request.method == "PATCH"))
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+        else:
+            serializer = self.get_serializer(request.user)
+            return Response(serializer.data)
 
     @action(
         methods=["post"],
@@ -418,16 +439,6 @@ class UserViewSet(viewsets.ModelViewSet):
 
         return Response(_("Password update successfully!"))
 
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        app_biller_user = self.request.query_params.get('app_biller_user')
-        if app_biller_user:
-            app_biller_user_type = ['billing user', 'delivery boy', 'waiter', 'captain', 'online acceptance app']
-            query = Q()
-            for user_type in app_biller_user_type:
-                query |= Q(type__iexact=user_type)
-            return queryset.filter(query)
-        return queryset
 
 
 class CustomPermissionViewSet(viewsets.ModelViewSet):
@@ -481,17 +492,51 @@ class MerchantProfileViewSet(viewsets.ModelViewSet):
     # search_fields = ["user__phone"]
     # ordering = [""]
 
-    def get_queryset(self):
-        # If superuser/admin — return all, else return only current user's merchant profile
-        user = self.request.user
-        if user.is_superuser:
-            return MerchantProfile.objects.all()
-        return MerchantProfile.objects.filter(user=user)
-
     def perform_create(self, serializer):
-        # Automatically assign logged-in user
-        serializer.save(user=self.request.user)
+        try:
+            serializer.save(user=self.request.user)
+        except IntegrityError:
+            raise ValidationError({
+                "detail": "A MerchantProfile already exists for this user."
+            })
+    @action(detail=False, methods=["get", "put", "patch"], url_path="me")
+    def me(self, request):
+        try:
+            merchant_profile = MerchantProfile.objects.get(user=request.user)
+        except MerchantProfile.DoesNotExist:
+            return Response(
+                {"success": False, "errors": "Merchant profile not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception:
+            return Response(
+                {"success": False, "errors": "Unexpected error occurred."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
+        if request.method in ["PUT", "PATCH"]:
+            try:
+                serializer = self.get_serializer(
+                    merchant_profile,
+                    data=request.data,
+                    partial=(request.method == "PATCH")
+                )
+                serializer.is_valid(raise_exception=True)
+                serializer.save()
+                return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
+            except ValidationError as ve:
+                return Response(
+                    {"success": False, "errors": ve.message_dict},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            except Exception:
+                return Response(
+                    {"success": False, "errors": "Failed to update profile."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+
+        serializer = self.get_serializer(merchant_profile)
+        return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 class WalletViewSet(viewsets.ModelViewSet):
     queryset = Wallet.objects.all()
     serializer_class = WalletSerializer

@@ -79,10 +79,13 @@ class BaseUserSerializer(serializers.ModelSerializer):
         ref_name = "BaseUserSerializer_ref"
         
     def get_photo(self, obj):
-        photo = obj.photo
-        if not photo:
-            return
-        return UserPhotoSerializer(obj).data
+        try:
+            photo = obj.photo
+            if not photo:
+                return None
+            return UserPhotoSerializer(obj, context=self.context).data
+        except Exception:
+            return None
 
 
 
@@ -99,7 +102,7 @@ class BaseUserSerializer(serializers.ModelSerializer):
 
 class UserPhotoSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(read_only=True)
-    image = serializers.ImageField(source="photo", allow_null=True)
+    image = serializers.SerializerMethodField()
     width = serializers.ReadOnlyField(source="width_photo", allow_null=True)
     height = serializers.ReadOnlyField(source="height_photo", allow_null=True)
 
@@ -107,6 +110,17 @@ class UserPhotoSerializer(serializers.ModelSerializer):
         model = get_user_model()
         fields = ("id", "image", "width", "height")
         ref_name = 'UserPhotoSerializer_ref'
+    
+    def get_image(self, obj):
+        try:
+            if obj.photo:
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(obj.photo.url)
+                return obj.photo.url
+            return None
+        except Exception:
+            return None
 
 
 class PasswordValidationSerializer(serializers.Serializer):
@@ -265,12 +279,19 @@ class MerchantProfileSerializer(serializers.ModelSerializer):
             'user_id',
             'user_uuid',
             'business_name',
+            'category',
+            'gender',
             'gst_number',
+            'fssai_number',
+            'latitude',
+            'longitude',
             'address',
             'area',
             'pin',
             'city',
             'state',
+            'logo',
+            'banner_image'
         ]
 
 class WalletSerializer(serializers.ModelSerializer):

@@ -2,7 +2,8 @@ from django.contrib import admin
 from django.db.models import BooleanField, Case, Value, When
 
 from freelancing.custom_auth.models import (ApplicationUser, MultiToken,
-                                            UserActivity, CustomPermission, MerchantProfile, Wallet)
+                                            UserActivity, CustomPermission,
+                                            MerchantProfile, Wallet, Category)
 
 # Register your models here.
 # admin.site.register(MultiToken)
