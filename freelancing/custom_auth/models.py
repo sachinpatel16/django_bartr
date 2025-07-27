@@ -169,6 +169,13 @@ class ApplicationUser(AbstractBaseUser, UserPhotoMixin, PermissionsMixin):
         help_text=_('Designates whether the user is a merchant.'),
     )
 
+    merchant_id = models.PositiveIntegerField(
+        _('Merchant ID'),
+        null=True,
+        blank=True,
+        help_text=_('Stores related MerchantProfile ID.')
+    )
+
     address = models.TextField(_("Address"), null=True, blank=True)
     area = models.CharField(_("Area"), max_length=256, null=True, blank=True)
     pin = models.CharField(_("PIN Code"), max_length=10, null=True, blank=True)

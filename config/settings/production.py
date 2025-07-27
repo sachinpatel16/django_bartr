@@ -51,11 +51,11 @@ if USE_CLOUDFRONT:
 else:
     AWS_S3_CUSTOM_DOMAIN = '{}.s3.amazonaws.com'.format(AWS_STORAGE_BUCKET_NAME)
 
-# STATIC_URL = '//{}/static/'.format(AWS_S3_CUSTOM_DOMAIN)
-# MEDIA_URL = '//{}/media/'.format(AWS_S3_CUSTOM_DOMAIN)
+STATIC_URL = '//{}/static/'.format(AWS_S3_CUSTOM_DOMAIN)
+MEDIA_URL = '//{}/media/'.format(AWS_S3_CUSTOM_DOMAIN)
 
-STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/freelancing/static/"
-MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/freelancing/media/"
+# STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/freelancing/static/"
+# MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/freelancing/media/"
 
 
 DEFAULT_FILE_STORAGE = 'config.settings.s3utils.MediaRootS3BotoStorage'

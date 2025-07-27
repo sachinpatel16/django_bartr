@@ -72,8 +72,8 @@ class BaseUserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ("id", "uuid", "phone", "fullname", "first_name","last_name", "last_name", "email", 
-                    "photo", "gender", "is_merchant", "address", "area", "pin", "city", "state",
+        fields = ("id", "uuid", "phone", "fullname", "first_name","last_name", "email", 
+                    "photo", "gender", "is_merchant", "merchant_id", "address", "area", "pin", "city", "state",
                     "password", "is_active")
         read_only_fields = ("uuid",)
         ref_name = "BaseUserSerializer_ref"
