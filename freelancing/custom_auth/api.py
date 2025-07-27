@@ -27,7 +27,7 @@ from rest_framework_simplejwt.tokens import RefreshToken # type: ignore
 from templated_email import send_templated_mail
 
 from freelancing.custom_auth.models import (ApplicationUser, LoginOtp, CustomBlacklistedToken,
-                                         CustomPermission, Wallet, MerchantProfile)
+                                         CustomPermission, Wallet, MerchantProfile, Category)
 from freelancing.custom_auth.permissions import IsSelf
 from freelancing.custom_auth.serializers import (BaseUserSerializer,
                                                 ChangePasswordSerializer,
@@ -36,7 +36,8 @@ from freelancing.custom_auth.serializers import (BaseUserSerializer,
                                                 UserPhotoSerializer,
                                                 UserStatisticSerializerMixin,
                                                 CustomPermissionSerializer, SendPasswordResetEmailSerializer,
-                                                UserPasswordResetSerializer, MerchantProfileSerializer, WalletSerializer
+                                                UserPasswordResetSerializer, MerchantProfileSerializer, WalletSerializer,
+                                                CategorySerializer
                                             
                                             )
 # from trade_time_accounting.notification.FCM_manager import unsubscribe_from_topic
@@ -478,6 +479,15 @@ class UserPasswordResetView(APIView):
 
 # MerchantProfileViewSet
 
+class CategoryViewSet(viewsets.ModelViewSet):
+    queryset = Category.objects.filter(is_active=True)
+    serializer_class = CategorySerializer
+    permission_classes = [
+        permissions.IsAuthenticated,
+        IsAPIKEYAuthenticated,
+    ]
+    authentication_classes = [JWTAuthentication]
+    filter_backends = (DjangoFilterBackend, SearchFilter)
 
 # Create your views here.
 class MerchantProfileViewSet(viewsets.ModelViewSet):

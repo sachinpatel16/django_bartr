@@ -6,7 +6,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from rest_framework.serializers import ModelSerializer
 
-from freelancing.custom_auth.models import ApplicationUser, CustomPermission, MerchantProfile, Wallet
+from freelancing.custom_auth.models import ApplicationUser, CustomPermission, MerchantProfile, Wallet, Category
 from freelancing.utils.validation import UniqueNameMixin
 
 from freelancing.utils.email_send import Util
@@ -267,6 +267,10 @@ class UserPasswordResetSerializer(serializers.Serializer):
             PasswordResetTokenGenerator().check_token(user, token)
             raise serializers.ValidationError("Token is not Valide or Expier")
 
+class CategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Category
+        fields = ['id', 'name', 'description', 'is_active', 'create_time', 'update_time']
 
 class MerchantProfileSerializer(serializers.ModelSerializer):
     user_id = serializers.IntegerField(source='user.id', read_only=True)       # User's integer ID
@@ -291,9 +295,12 @@ class MerchantProfileSerializer(serializers.ModelSerializer):
             'city',
             'state',
             'logo',
-            'banner_image'
+            'banner_image',
+            'create_time',
+            'update_time',
+            
         ]
-
+        read_only_fields = ['id', 'user_id', 'user_uuid', 'create_time', 'update_time']
 class WalletSerializer(serializers.ModelSerializer):
     owner_type = serializers.CharField(source='content_type.model', read_only=True)
     owner_id = serializers.UUIDField(source='object_id')
@@ -309,6 +316,6 @@ class WalletSerializer(serializers.ModelSerializer):
             'owner_repr',
             'updated_at',
         ]
-
+    read_only_fields = ['id', 'balance', 'owner_type', 'create_time', 'updated_time']
     def get_owner_repr(self, obj):
         return str(obj.content_object)

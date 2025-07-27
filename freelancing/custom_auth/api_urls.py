@@ -15,6 +15,8 @@ router.register("v1/merchant_profile", api.MerchantProfileViewSet, basename="mer
 
 #Wallet
 router.register("v1/wallet", api.WalletViewSet, basename="wallet")
+
+router.register("v1/category", api.CategoryViewSet, basename="category")
 app_name = "custom-auth"
 
 urlpatterns = [
