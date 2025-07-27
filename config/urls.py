@@ -14,7 +14,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication  # type: i
 # For swagger
 schema_view = get_schema_view(
     openapi.Info(
-        title="Trade Time Accounting",
+        title="Bartr",
         default_version='v1',
         description="API documentation for Trade Time Accounting",
         terms_of_service="https://www.yourwebsite.com/terms/",
