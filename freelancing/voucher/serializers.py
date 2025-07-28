@@ -12,13 +12,13 @@ class VoucherCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Voucher
         fields = [
-            "merchant","title", "message", "terms_conditions", "count", "image", "voucher_type",
+            "merchant","category","title", "message", "terms_conditions", "count", "image", "voucher_type",
             "percentage_value", "percentage_min_bill",
             "flat_amount", "flat_min_bill",
             "product_name", "product_min_bill",
             "is_gift_card"
         ]
-        
+        read_only_fields = ["merchant", "category"]
 
     def create(self, validated_data):
         # user = self.context["request"].user.uuid
@@ -27,9 +27,12 @@ class VoucherCreateSerializer(serializers.ModelSerializer):
         # import pdb
         # pdb.set_trace()  # Debugging line to inspect user object
         user_uuid = user.uuid  # ✅ Get UUID without overwriting user
-        merchant = user.merchant_profile
-        validated_data["merchant"] = merchant
-        validated_data["category"] = merchant.category
+        merchant_id = MerchantProfile.objects.get(user=user)
+        # import pdb
+        # pdb.set_trace()
+        # merchant = user.merchant_profile
+        validated_data["merchant"] = merchant_id
+        validated_data["category"] = merchant_id.category
 
         # Determine cost
         is_gift_card = validated_data.get("is_gift_card", False)
@@ -37,10 +40,10 @@ class VoucherCreateSerializer(serializers.ModelSerializer):
         cost_value = Decimal(SiteSetting.get_value(cost_key, 10))
 
         # Get wallet
-        user_uuid = User.objects.get(uuid=user_uuid)
+        # user_uuid = User.objects.get(uuid=user_uuid)
         # import pdb
         # pdb.set_trace()
-        wallet = Wallet.objects.filter(object_id=user_uuid.uuid).first()
+        wallet = Wallet.objects.filter(object_id=user_uuid).first()
         # wallet = Wallet.objects.filter(object_id=user_uuid.uuid, content_type=ContentType.objects.get_for_model(MerchantProfile)).first()
         if not wallet:
             raise serializers.ValidationError("Merchant wallet does not exist.")
