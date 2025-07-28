@@ -27,3 +27,12 @@ def update_user_merchant_flag(sender, instance, created, **kwargs):
         user.is_merchant = True
         user.merchant_id = instance.id
         user.save(update_fields=["is_merchant", "merchant_id"])
+
+@receiver(post_save, sender=MerchantProfile)
+def create_wallet_for_merchant(sender, instance, created, **kwargs):
+    if created:
+        content_type = ContentType.objects.get_for_model(MerchantProfile)
+        Wallet.objects.get_or_create(
+            content_type=content_type,
+            object_id=instance.id,
+        )

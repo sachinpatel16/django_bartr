@@ -11,6 +11,8 @@ from django.utils.http import urlsafe_base64_encode
 from django.utils.translation import gettext_lazy as _
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
+from decimal import Decimal
+from django.core.exceptions import ValidationError
 from model_utils import Choices
 from phonenumber_field.modelfields import PhoneNumberField
 from rest_framework.authtoken.models import Token
@@ -302,16 +304,52 @@ class MerchantProfile(BaseModel):
         return f"{self.business_name} ({self.user.email})"
 
 
-class Wallet(models.Model):
+class Wallet(BaseModel):
     balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
     object_id = models.UUIDField()
     content_object = GenericForeignKey('content_type', 'object_id')
-    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"Wallet of {self.content_object} - ₹{self.balance}"
 
+    def deduct(self, amount: Decimal, note=None, ref_id=None):
+        if self.balance < amount:
+            raise ValidationError("Insufficient balance in wallet.")
+        self.balance -= amount
+        self.save()
+        WalletHistory.objects.create(
+            wallet=self,
+            amount=-amount,
+            transaction_type='debit',
+            reference_note=note,
+            reference_id=ref_id
+        )
+
+    def credit(self, amount: Decimal, note=None, ref_id=None):
+        self.balance += amount
+        self.save()
+        WalletHistory.objects.create(
+            wallet=self,
+            amount=amount,
+            transaction_type='credit',
+            reference_note=note,
+            reference_id=ref_id
+        )
+class WalletHistory(BaseModel):
+    TRANSACTION_CHOICES = (
+        ('credit', 'Credit'),
+        ('debit', 'Debit'),
+    )
+
+    wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='histories')
+    transaction_type = models.CharField(max_length=10, choices=TRANSACTION_CHOICES)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    reference_note = models.CharField(max_length=255, null=True, blank=True)
+    reference_id = models.CharField(max_length=100, null=True, blank=True)  # e.g. Voucher ID or Order ID
+    meta = models.JSONField(null=True, blank=True) 
+    def __str__(self):
+        return f"{self.transaction_type.title()} ₹{self.amount}"
 
 class LoginOtp(BaseModel):
     """
@@ -358,3 +396,16 @@ class CustomPermission(BaseModel):
         return self.name
 
 
+class SiteSetting(BaseModel):
+    key = models.CharField(max_length=100, unique=True)
+    value = models.CharField(max_length=255)
+
+    def __str__(self):
+        return f"{self.key}: {self.value}"
+
+    @staticmethod
+    def get_value(key, default=None):
+        try:
+            return SiteSetting.objects.get(key=key).value
+        except SiteSetting.DoesNotExist:
+            return default

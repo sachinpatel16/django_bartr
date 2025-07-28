@@ -30,5 +30,7 @@ urlpatterns = [
         api.UserPasswordResetView.as_view(),
         name="user_reset_view",
     ),
+    path("v1/wallet/history/", api.WalletHistoryListView.as_view(), name="wallet-history"),
+    path("v1/wallet/summary/", api.WalletSummaryView.as_view(), name="wallet-summary"),
     path("", include(router.urls))
 ]

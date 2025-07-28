@@ -12,7 +12,7 @@ from django.utils.translation import gettext as _
 from django.contrib.contenttypes.models import ContentType
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import IntegrityError
-from rest_framework import permissions, status, viewsets
+from rest_framework import permissions, status, viewsets, generics, filters
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.filters import SearchFilter
@@ -27,7 +27,8 @@ from rest_framework_simplejwt.tokens import RefreshToken # type: ignore
 from templated_email import send_templated_mail
 
 from freelancing.custom_auth.models import (ApplicationUser, LoginOtp, CustomBlacklistedToken,
-                                         CustomPermission, Wallet, MerchantProfile, Category)
+                                         CustomPermission, Wallet, MerchantProfile, Category,
+                                        WalletHistory)
 from freelancing.custom_auth.permissions import IsSelf
 from freelancing.custom_auth.serializers import (BaseUserSerializer,
                                                 ChangePasswordSerializer,
@@ -37,7 +38,7 @@ from freelancing.custom_auth.serializers import (BaseUserSerializer,
                                                 UserStatisticSerializerMixin,
                                                 CustomPermissionSerializer, SendPasswordResetEmailSerializer,
                                                 UserPasswordResetSerializer, MerchantProfileSerializer, WalletSerializer,
-                                                CategorySerializer
+                                                CategorySerializer, WalletHistorySerializer
                                             
                                             )
 # from trade_time_accounting.notification.FCM_manager import unsubscribe_from_topic
@@ -569,3 +570,42 @@ class WalletViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         return Response({"detail": "Wallet cannot be deleted manually."}, status=status.HTTP_403_FORBIDDEN)
+
+class WalletHistoryListView(generics.ListAPIView):
+    serializer_class = WalletHistorySerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["transaction_type", "reference_note", "reference_id"]
+    ordering_fields = ["create_time", "amount"]
+    ordering = ["-create_time"]
+
+    def get_queryset(self):
+        user = self.request.user
+        wallet = Wallet.objects.filter(
+            object_id=user.uuid
+            # content_type=ContentType.objects.get_for_model(user.merchant_profile)
+        ).first()
+
+        if not wallet:
+            return WalletHistory.objects.none()
+
+        return wallet.histories.all()
+
+class WalletSummaryView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        merchant = request.user.merchant_profile
+        wallet = Wallet.objects.filter(
+            object_id=merchant.id,
+            content_type=ContentType.objects.get_for_model(merchant)
+        ).first()
+
+        if not wallet:
+            return Response({"balance": 0.0, "history": []})
+
+        serializer = WalletHistorySerializer(wallet.histories.order_by("-created_at")[:5], many=True)
+        return Response({
+            "balance": wallet.balance,
+            "recent_transactions": serializer.data
+        })

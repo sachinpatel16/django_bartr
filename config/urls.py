@@ -33,6 +33,7 @@ urlpatterns = [
     path('api/', include([
         path('registration/', include('freelancing.registrations.api_urls')),
         path('custom_auth/', include('freelancing.custom_auth.api_urls')),
+        path('voucher/', include('freelancing.voucher.api_urls')),
     ])),
     path('i18n/', include('django.conf.urls.i18n')),  # Enable language switching
 ]
