@@ -2,7 +2,6 @@
 
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth import get_user_model
 
 from freelancing.custom_auth.models import Wallet, MerchantProfile
@@ -12,11 +11,9 @@ User = get_user_model()
 def create_user_wallet(sender, instance, created, **kwargs):
     if created:
         # Create wallet with 1000.00 for the new user
-        content_type = ContentType.objects.get_for_model(User)
         Wallet.objects.create(
-            balance=1000.00,
-            content_type=content_type,
-            object_id=instance.uuid
+            user=instance,
+            balance=1000.00
         )
 
 
@@ -27,12 +24,4 @@ def update_user_merchant_flag(sender, instance, created, **kwargs):
         user.is_merchant = True
         user.merchant_id = instance.id
         user.save(update_fields=["is_merchant", "merchant_id"])
-
-@receiver(post_save, sender=MerchantProfile)
-def create_wallet_for_merchant(sender, instance, created, **kwargs):
-    if created:
-        content_type = ContentType.objects.get_for_model(MerchantProfile)
-        Wallet.objects.get_or_create(
-            content_type=content_type,
-            object_id=instance.id,
-        )
+        # No separate wallet creation - user already has wallet

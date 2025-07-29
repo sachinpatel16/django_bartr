@@ -93,3 +93,17 @@ class WhatsAppContact(BaseModel):
 
     def __str__(self):
         return f"{self.name} ({'✅' if self.is_on_whatsapp else '❌'})"
+
+# class UserVoucherRedemption(BaseModel):
+#     """Track which users redeemed which vouchers"""
+#     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='voucher_redemptions')
+#     voucher = models.ForeignKey(Voucher, on_delete=models.CASCADE, related_name='user_redemptions')
+#     redeemed_at = models.DateTimeField(auto_now_add=True)
+#     is_gift_voucher = models.BooleanField(default=False)  # Track if it was a gift voucher redemption
+   
+#     class Meta:
+#         unique_together = ['user', 'voucher']  # User can only redeem a voucher once
+#         ordering = ['-redeemed_at']
+   
+#     def __str__(self):
+#         return f"{self.user.fullname} redeemed {self.voucher.title}"

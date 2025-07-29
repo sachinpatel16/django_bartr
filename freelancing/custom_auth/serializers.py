@@ -1,3 +1,4 @@
+import re
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -275,55 +276,72 @@ class CategorySerializer(serializers.ModelSerializer):
         model = Category
         fields = ['id', 'name', 'description', 'is_active', 'create_time', 'update_time']
 
-class MerchantProfileSerializer(serializers.ModelSerializer):
-    user_id = serializers.IntegerField(source='user.id', read_only=True)       # User's integer ID
-    user_uuid = serializers.UUIDField(source='user.uuid', read_only=True)      # User's UUID
+def validate_gst_number(value):
+    """Validate GST number format"""
+    if not value:
+        return value
+   
+    # GST number pattern: 2 digits + 10 digits + 1 digit + 1 digit
+    gst_pattern = r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$'
+   
+    if not re.match(gst_pattern, value.upper()):
+        raise ValidationError(
+            _('Invalid GST number format. Expected format: 22AAAAA0000A1Z5')
+        )
+    return value.upper()
 
+def validate_fssai_number(value):
+    """Validate FSSAI number format"""
+    if not value:
+        return value
+   
+    # FSSAI number pattern: 14 digits
+    fssai_pattern = r'^[0-9]{14}$'
+   
+    if not re.match(fssai_pattern, value):
+        raise ValidationError(
+            _('Invalid FSSAI number format. Expected format: 14 digits')
+        )
+    return value
+
+class MerchantProfileSerializer(serializers.ModelSerializer):
+    gst_number = serializers.CharField(validators=[validate_gst_number], required=False, allow_blank=True)
+    fssai_number = serializers.CharField(validators=[validate_fssai_number], required=False, allow_blank=True)
+   
     class Meta:
         model = MerchantProfile
         fields = [
-            'id',
-            'user_id',
-            'user_uuid',
-            'business_name',
-            'category',
-            'gender',
-            'gst_number',
-            'fssai_number',
-            'latitude',
-            'longitude',
-            'address',
-            'area',
-            'pin',
-            'city',
-            'state',
-            'logo',
-            'banner_image',
-            'create_time',
-            'update_time',
-            
+            'id', 'user', 'category', 'business_name', 'email', 'phone', 'gender',
+            'gst_number', 'fssai_number', 'address', 'area', 'pin', 'city', 'state',
+            'latitude', 'longitude', 'logo', 'banner_image'
         ]
-        read_only_fields = ['id', 'user_id', 'user_uuid', 'create_time', 'update_time']
-class WalletSerializer(serializers.ModelSerializer):
-    owner_type = serializers.CharField(source='content_type.model', read_only=True)
-    owner_id = serializers.UUIDField(source='object_id')
-    owner_repr = serializers.SerializerMethodField()
+        read_only_fields = ['user']
 
+    def validate(self, data):
+        """Validate merchant profile data"""
+        category = data.get('category')
+        fssai_number = data.get('fssai_number')
+       
+        # Check if FSSAI is required for food category
+        if category and category.name.lower() in ['food', 'restaurant', 'cafe', 'bakery']:
+            if not fssai_number:
+                raise serializers.ValidationError(
+                    "FSSAI number is required for food-related businesses"
+                )
+       
+        return data
+
+class WalletSerializer(serializers.ModelSerializer):
+    # user_name = serializers.CharField(source='user.fullname', read_only=True)
+    # user_email = serializers.CharField(source='user.email', read_only=True)
+   
     class Meta:
         model = Wallet
         fields = [
-            'id',
-            'balance',
-            'owner_type',
-            'owner_id',
-            'owner_repr',
-            # 'create_time',
-            # 'updated_time',
+            'id', 'user', 'balance',
+            'is_active', 'create_time', 'update_time'
         ]
-    read_only_fields = ['id', 'balance', 'owner_type', 'create_time', 'updated_time']
-    def get_owner_repr(self, obj):
-        return str(obj.content_object)
-
+        read_only_fields = ['id', 'create_time', 'update_time']
 
 class WalletHistorySerializer(serializers.ModelSerializer):
     class Meta:

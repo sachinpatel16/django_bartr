@@ -500,6 +500,7 @@ class MerchantProfileViewSet(viewsets.ModelViewSet):
     ]
     authentication_classes = [JWTAuthentication]
     filter_backends = (DjangoFilterBackend, SearchFilter)
+    http_method_names = ['get']
     # search_fields = ["user__phone"]
     # ordering = [""]
 
@@ -555,18 +556,17 @@ class WalletViewSet(viewsets.ModelViewSet):
         permissions.IsAuthenticated,
         IsAPIKEYAuthenticated,
     ]
+    http_method_names = ['get']
     authentication_classes = [JWTAuthentication]
     filter_backends = (DjangoFilterBackend, SearchFilter)
 
     def get_queryset(self):
         user = self.request.user
-        user_ct = ContentType.objects.get_for_model(user.__class__)
-        return Wallet.objects.filter(content_type=user_ct, object_id=user.uuid)
+        return Wallet.objects.filter(user=user)
 
     def perform_create(self, serializer):
         user = self.request.user
-        user_ct = ContentType.objects.get_for_model(user.__class__)
-        serializer.save(content_type=user_ct, object_id=user.uuid)
+        serializer.save(user=user)
 
     def destroy(self, request, *args, **kwargs):
         return Response({"detail": "Wallet cannot be deleted manually."}, status=status.HTTP_403_FORBIDDEN)
@@ -581,10 +581,7 @@ class WalletHistoryListView(generics.ListAPIView):
 
     def get_queryset(self):
         user = self.request.user
-        wallet = Wallet.objects.filter(
-            object_id=user.uuid
-            # content_type=ContentType.objects.get_for_model(user.merchant_profile)
-        ).first()
+        wallet = Wallet.objects.filter(user=user).first()
 
         if not wallet:
             return WalletHistory.objects.none()
@@ -595,16 +592,14 @@ class WalletSummaryView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        merchant = request.user.merchant_profile
-        wallet = Wallet.objects.filter(
-            object_id=merchant.id,
-            content_type=ContentType.objects.get_for_model(merchant)
-        ).first()
+        # Use user's wallet (common wallet for both user and merchant)
+        user = request.user
+        wallet = Wallet.objects.filter(user=user).first()
 
         if not wallet:
-            return Response({"balance": 0.0, "history": []})
+            return Response({"balance": 0.0, "recent_transactions": []})
 
-        serializer = WalletHistorySerializer(wallet.histories.order_by("-created_at")[:5], many=True)
+        serializer = WalletHistorySerializer(wallet.histories.order_by("-create_time")[:5], many=True)
         return Response({
             "balance": wallet.balance,
             "recent_transactions": serializer.data

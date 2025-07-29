@@ -305,13 +305,14 @@ class MerchantProfile(BaseModel):
 
 
 class Wallet(BaseModel):
+    user = models.OneToOneField(ApplicationUser, on_delete=models.CASCADE, related_name='wallet')
     balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
-    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
-    object_id = models.UUIDField()
-    content_object = GenericForeignKey('content_type', 'object_id')
 
     def __str__(self):
-        return f"Wallet of {self.content_object} - ₹{self.balance}"
+        if self.user:
+            return f"Wallet of {self.user.fullname} - ₹{self.balance}"
+        else:
+            return f"Orphaned Wallet - ₹{self.balance}"
 
     def deduct(self, amount: Decimal, note=None, ref_id=None):
         if self.balance < amount:
