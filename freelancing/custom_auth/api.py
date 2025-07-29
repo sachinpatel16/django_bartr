@@ -500,7 +500,7 @@ class MerchantProfileViewSet(viewsets.ModelViewSet):
     ]
     authentication_classes = [JWTAuthentication]
     filter_backends = (DjangoFilterBackend, SearchFilter)
-    http_method_names = ['get']
+    http_method_names = ['get', 'post']
     # search_fields = ["user__phone"]
     # ordering = [""]
 

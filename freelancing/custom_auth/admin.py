@@ -3,7 +3,7 @@ from django.db.models import BooleanField, Case, Value, When
 
 from freelancing.custom_auth.models import (ApplicationUser, MultiToken,
                                             UserActivity, CustomPermission,
-                                            MerchantProfile, Wallet, Category, WalletHistory)
+                                            MerchantProfile, Wallet, Category, WalletHistory, SiteSetting)
 
 # Register your models here.
 # admin.site.register(MultiToken)
@@ -13,6 +13,7 @@ admin.site.register(MerchantProfile)
 admin.site.register(Wallet)
 admin.site.register(Category)
 admin.site.register(WalletHistory)
+admin.site.register(SiteSetting)
 
 from datetime import timedelta
 
