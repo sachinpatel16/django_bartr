@@ -9,9 +9,17 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from django_filters.rest_framework import DjangoFilterBackend
+from django.db import IntegrityError, DatabaseError
+from decimal import Decimal, InvalidOperation
 
-from freelancing.voucher.models import Voucher, WhatsAppContact, Advertisement
-from freelancing.voucher.serializers import VoucherCreateSerializer, WhatsAppContactSerializer, GiftCardShareSerializer, AdvertisementSerializer
+from freelancing.voucher.models import Voucher, WhatsAppContact, Advertisement, UserVoucherRedemption, VoucherType
+from freelancing.voucher.serializers import (
+    VoucherCreateSerializer, WhatsAppContactSerializer, GiftCardShareSerializer, 
+    AdvertisementSerializer, VoucherListSerializer, VoucherPurchaseSerializer,
+    UserVoucherSerializer, VoucherRedeemSerializer, VoucherTypeSerializer,
+    VoucherCancelSerializer, VoucherRefundSerializer, PurchaseHistorySerializer
+)
+from freelancing.custom_auth.models import Wallet, SiteSetting
 from rest_framework.filters import SearchFilter
 
 class VoucherViewSet(viewsets.ModelViewSet):
@@ -25,7 +33,8 @@ class VoucherViewSet(viewsets.ModelViewSet):
     filter_backends = (DjangoFilterBackend, SearchFilter)
     search_fields = ["title", "message", "merchant__business_name"]
     ordering = ["-create_time"]
-    filterset_fields = ["voucher_type", "is_gift_card"]
+    filterset_fields = ["voucher_type", "is_gift_card", "category"]
+
     def get_queryset(self):
         # Only show merchant's own vouchers
         return Voucher.objects.filter(merchant__user=self.request.user)
@@ -117,16 +126,11 @@ class VoucherViewSet(viewsets.ModelViewSet):
                     failed_numbers.append(contact.phone_number)
            
             return Response({
-                "message": f"Gift card shared to {success_count} contacts",
+                "message": f"Gift card shared successfully to {success_count} contacts",
                 "success_count": success_count,
                 "failed_numbers": failed_numbers
             })
            
-        except Voucher.DoesNotExist:
-            return Response(
-                {"error": "Gift card not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
         except Exception as e:
             return Response(
                 {"error": "Failed to share gift card"},
@@ -135,36 +139,9 @@ class VoucherViewSet(viewsets.ModelViewSet):
 
     def send_whatsapp_gift_card(self, phone_number, voucher):
         """Send gift card via WhatsApp API"""
-        # This is a placeholder - implement based on your WhatsApp provider
-        # Example: Twilio, MessageBird, etc.
-        
-        message = f"""
-                🎁 *Gift Card from {voucher.merchant.business_name}*
-
-                *{voucher.title}*
-
-                {voucher.message}
-
-                💰 *Value*: {self.get_voucher_value(voucher)}
-                📅 *Valid Until*: Unlimited
-                🎯 *Terms*: {voucher.terms_conditions[:100]}...
-
-                Use this gift card at {voucher.merchant.business_name}!
-        """
-       
-        # Implement your WhatsApp API call here
-        # Example with a generic API:
         try:
-            # api_url = "https://your-whatsapp-api.com/send"
-            # payload = {
-            #     "phone": phone_number,
-            #     "message": message,
-            #     "type": "text"
-            # }
-            # response = requests.post(api_url, json=payload)
-            # return response.status_code == 200
-           
-            # For now, return True as placeholder
+            # Implement your WhatsApp API integration here
+            # This is a placeholder implementation
             return True
         except Exception:
             return False
@@ -204,30 +181,488 @@ class VoucherViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    # @action(detail=False, methods=["get"], url_path="gift-cards",permission_classes=[permissions.AllowAny,
-    #                                                             IsAPIKEYAuthenticated])
-    # def gift_cards(self, request):
-    #     """Get user's gift cards"""
-    #     try:
-    #         gift_cards = Voucher.objects.filter(
-    #             merchant__user=request.user,
-    #             is_gift_card=True
-    #         ).order_by('-create_time')
-           
-    #         data = [{
-    #             "id": v.id,
-    #             "title": v.title,
-    #             "message": v.message,
-    #             "value": self.get_voucher_value(v),
-    #             "created_at": v.create_time
-    #         } for v in gift_cards]
-           
-    #         return Response(data)
-    #     except Exception as e:
-    #         return Response(
-    #             {"error": "Failed to fetch gift cards"},
-    #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
-    #         )
+class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
+    """Public API for users to browse and purchase vouchers"""
+    queryset = Voucher.objects.filter(is_active=True, is_gift_card=False)
+    serializer_class = VoucherListSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    authentication_classes = [JWTAuthentication]
+    filter_backends = (DjangoFilterBackend, SearchFilter)
+    search_fields = ["title", "message", "merchant__business_name"]
+    filterset_fields = ["voucher_type", "category", "merchant"]
+    ordering = ["-create_time"]
+
+    def get_queryset(self):
+        """Filter vouchers based on availability and user preferences"""
+        queryset = super().get_queryset()
+        
+        # Filter by category if provided
+        category_id = self.request.query_params.get('category')
+        if category_id:
+            queryset = queryset.filter(category_id=category_id)
+        
+        # Filter by merchant if provided
+        merchant_id = self.request.query_params.get('merchant')
+        if merchant_id:
+            queryset = queryset.filter(merchant_id=merchant_id)
+        
+        # Filter by voucher type if provided
+        voucher_type = self.request.query_params.get('voucher_type')
+        if voucher_type:
+            queryset = queryset.filter(voucher_type__name=voucher_type)
+        
+        # Filter by price range if provided
+        min_cost = self.request.query_params.get('min_cost')
+        max_cost = self.request.query_params.get('max_cost')
+        
+        if min_cost or max_cost:
+            # This would require additional logic to filter by purchase cost
+            # For now, we'll return all vouchers
+            pass
+        
+        return queryset
+
+    @action(detail=False, methods=["get"], url_path="categories")
+    def voucher_categories(self, request):
+        """Get all voucher categories"""
+        categories = VoucherType.objects.filter(is_active=True)
+        serializer = VoucherTypeSerializer(categories, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="featured")
+    def featured_vouchers(self, request):
+        """Get featured vouchers (most popular)"""
+        featured = self.get_queryset().filter(
+            redemption_count__gt=0
+        ).order_by('-redemption_count')[:10]
+        serializer = self.get_serializer(featured, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="nearby")
+    def nearby_vouchers(self, request):
+        """Get vouchers from nearby merchants"""
+        # This would require location-based filtering
+        # For now, return recent vouchers
+        nearby = self.get_queryset().order_by('-create_time')[:20]
+        serializer = self.get_serializer(nearby, many=True)
+        return Response(serializer.data)
+
+class VoucherPurchaseViewSet(viewsets.ViewSet):
+    """Handle voucher purchases with optimized transaction management"""
+    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    @action(detail=False, methods=["post"], url_path="purchase", permission_classes=[permissions.AllowAny,
+                                                                IsAPIKEYAuthenticated])
+    def purchase_voucher(self, request):
+        """Purchase a voucher using wallet points with atomic transaction"""
+        # Check if user is authenticated
+        if not request.user.is_authenticated:
+            return Response(
+                {"error": "Authentication required. Please provide a valid JWT token."},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        serializer = VoucherPurchaseSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        
+        voucher_id = serializer.validated_data['voucher_id']
+        user = request.user
+        
+        try:
+            # Use atomic transaction for all database operations
+            with transaction.atomic():
+                # 1. Get voucher with select_for_update to prevent race conditions
+                try:
+                    voucher = Voucher.objects.select_for_update().get(
+                        id=voucher_id, 
+                        is_active=True
+                    )
+                except Voucher.DoesNotExist:
+                    raise ValidationError("Voucher not found or inactive")
+                
+                # 2. Check if user already purchased this voucher
+                if UserVoucherRedemption.objects.filter(
+                    user=user, 
+                    voucher=voucher
+                ).exists():
+                    raise ValidationError("You have already purchased this voucher")
+                
+                # 3. Check voucher availability
+                if voucher.count and voucher.redemption_count >= voucher.count:
+                    raise ValidationError("Voucher is out of stock")
+
+                # 4. Get user wallet with select_for_update
+                try:
+                    wallet = Wallet.objects.select_for_update().get(user=user)
+                except Wallet.DoesNotExist:
+                    raise ValidationError("User wallet not found")
+                
+                # 5. Calculate cost with proper decimal handling
+                try:
+                    # Get voucher cost from settings, with better error handling
+                    voucher_cost_setting = SiteSetting.get_value("voucher_cost", "10")
+                    cost = Decimal(str(voucher_cost_setting))
+                    if cost <= 0:
+                        raise ValidationError("Invalid voucher cost")
+                except (InvalidOperation, ValueError, TypeError):
+                    # If there's any issue with the setting, use default value
+                    cost = Decimal("10")
+                    if cost <= 0:
+                        raise ValidationError("Invalid voucher cost")
+                
+                # 6. Validate sufficient balance
+                if wallet.balance < cost:
+                    raise ValidationError(
+                        f"Insufficient balance. Required: ₹{cost}, Available: ₹{wallet.balance}"
+                    ) 
+                
+                # 7. Generate unique transaction ID
+                transaction_id = f"WT-{wallet.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
+
+                # 8. Deduct from wallet with error handling
+                try:
+                    wallet.deduct(cost, note=f"Voucher Purchase: {voucher.title}", ref_id=str(voucher.id))
+                except ValidationError as e:
+                    raise ValidationError(f"Wallet deduction failed: {str(e)}")
+                # 9. Create redemption record
+                try:
+                    redemption = UserVoucherRedemption.objects.create(
+                        user=user,
+                        voucher=voucher,
+                        purchase_cost=cost,
+                        is_active=True,
+                        wallet_transaction_id=transaction_id
+                    )
+                except IntegrityError:
+                    raise ValidationError("Failed to create purchase record")
+
+                return Response({
+                    "message": "Voucher purchased successfully",
+                    "voucher_id": voucher.id,
+                    "voucher_title": voucher.title,
+                    "purchase_cost": float(cost),
+                    "remaining_balance": float(wallet.balance),
+                    "redemption_id": redemption.id,
+                    "purchase_reference": redemption.purchase_reference,
+                    "expiry_date": redemption.expiry_date,
+                    "transaction_id": transaction_id
+                }, status=status.HTTP_201_CREATED)
+                
+        except ValidationError as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except DatabaseError as e:
+            return Response(
+                {"error": "Database error occurred. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            return Response(
+                {"error": "An unexpected error occurred. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=["post"], url_path="redeem")
+    def redeem_purchased_voucher(self, request):
+        """Redeem a purchased voucher with atomic transaction"""
+        serializer = VoucherRedeemSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        
+        redemption_id = serializer.validated_data['redemption_id']
+        location = serializer.validated_data.get('location', '')
+        notes = serializer.validated_data.get('notes', '')
+        user = request.user
+        
+        try:
+            with transaction.atomic():
+                # 1. Get redemption record with select_for_update
+                try:
+                    redemption = UserVoucherRedemption.objects.select_for_update().get(
+                        id=redemption_id,
+                        user=user
+                    )
+                except UserVoucherRedemption.DoesNotExist:
+                    raise ValidationError("Voucher not found or not purchased")
+                
+                # 2. Validate redemption eligibility
+                if not redemption.can_redeem():
+                    if redemption.is_expired():
+                        raise ValidationError("Voucher has expired")
+                    elif redemption.redeemed_at:
+                        raise ValidationError("Voucher has already been redeemed")
+                    else:
+                        raise ValidationError("Voucher cannot be redeemed")
+                
+                # 3. Redeem the voucher
+                try:
+                    redemption.redeem(location=location, notes=notes)
+                except ValidationError as e:
+                    raise ValidationError(f"Redemption failed: {str(e)}")
+                
+                return Response({
+                    "message": "Voucher redeemed successfully",
+                    "voucher_title": redemption.voucher.title,
+                    "redeemed_at": redemption.redeemed_at,
+                    "redemption_location": redemption.redemption_location,
+                    "purchase_reference": redemption.purchase_reference,
+                    "transaction_id": redemption.wallet_transaction_id
+                })
+                
+        except ValidationError as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except DatabaseError as e:
+            return Response(
+                {"error": "Database error occurred. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            return Response(
+                {"error": "An unexpected error occurred. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=["post"], url_path="cancel")
+    def cancel_purchase(self, request):
+        """Cancel a voucher purchase with atomic transaction"""
+        serializer = VoucherCancelSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        
+        redemption_id = serializer.validated_data['redemption_id']
+        reason = serializer.validated_data.get('reason', '')
+        user = request.user
+        
+        try:
+            with transaction.atomic():
+                # 1. Get redemption record with select_for_update
+                try:
+                    redemption = UserVoucherRedemption.objects.select_for_update().get(
+                        id=redemption_id,
+                        user=user
+                    )
+                except UserVoucherRedemption.DoesNotExist:
+                    raise ValidationError("Voucher not found")
+                
+                # 2. Validate cancellation eligibility
+                if redemption.redeemed_at:
+                    raise ValidationError("Cannot cancel redeemed voucher")
+                if redemption.purchase_status in ['cancelled', 'refunded']:
+                    raise ValidationError("Voucher is already cancelled or refunded")
+                
+                # 3. Cancel the purchase
+                try:
+                    redemption.cancel_purchase(reason=reason)
+                except ValidationError as e:
+                    raise ValidationError(f"Cancellation failed: {str(e)}")
+                
+                return Response({
+                    "message": "Voucher purchase cancelled successfully",
+                    "voucher_title": redemption.voucher.title,
+                    "purchase_reference": redemption.purchase_reference,
+                    "purchase_status": redemption.purchase_status,
+                    "transaction_id": redemption.wallet_transaction_id
+                })
+                
+        except ValidationError as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except DatabaseError as e:
+            return Response(
+                {"error": "Database error occurred. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            return Response(
+                {"error": "An unexpected error occurred. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=["post"], url_path="refund")
+    def refund_purchase(self, request):
+        """Refund a voucher purchase with atomic transaction"""
+        serializer = VoucherRefundSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        
+        redemption_id = serializer.validated_data['redemption_id']
+        reason = serializer.validated_data.get('reason', '')
+        user = request.user
+        
+        try:
+            with transaction.atomic():
+                # 1. Get redemption record with select_for_update
+                try:
+                    redemption = UserVoucherRedemption.objects.select_for_update().get(
+                        id=redemption_id,
+                        user=user
+                    )
+                except UserVoucherRedemption.DoesNotExist:
+                    raise ValidationError("Voucher not found")
+                
+                # 2. Validate refund eligibility
+                if redemption.redeemed_at:
+                    raise ValidationError("Cannot refund redeemed voucher")
+                if redemption.purchase_status in ['cancelled', 'refunded']:
+                    raise ValidationError("Voucher is already cancelled or refunded")
+                
+                # 3. Get user wallet with select_for_update
+                try:
+                    wallet = Wallet.objects.select_for_update().get(user=user)
+                except Wallet.DoesNotExist:
+                    raise ValidationError("User wallet not found for refund")
+                
+                # 4. Refund the purchase
+                try:
+                    redemption.refund_purchase(reason=reason)
+                except ValidationError as e:
+                    raise ValidationError(f"Refund failed: {str(e)}")
+                
+                return Response({
+                    "message": "Voucher purchase refunded successfully",
+                    "voucher_title": redemption.voucher.title,
+                    "purchase_reference": redemption.purchase_reference,
+                    "refund_amount": float(redemption.purchase_cost),
+                    "remaining_balance": float(wallet.balance),
+                    "purchase_status": redemption.purchase_status,
+                    "transaction_id": redemption.wallet_transaction_id
+                })
+                
+        except ValidationError as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except DatabaseError as e:
+            return Response(
+                {"error": "Database error occurred. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            return Response(
+                {"error": "An unexpected error occurred. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+class UserVoucherViewSet(viewsets.ReadOnlyModelViewSet):
+    """Manage user's purchased vouchers"""
+    serializer_class = UserVoucherSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    authentication_classes = [JWTAuthentication]
+    filter_backends = (DjangoFilterBackend,)
+    filterset_fields = ["purchase_status", "is_gift_voucher"]
+    ordering = ["-purchased_at"]
+
+    def get_queryset(self):
+        """Get user's purchased vouchers"""
+        return UserVoucherRedemption.objects.filter(user=self.request.user)
+
+    @action(detail=False, methods=["get"], url_path="active")
+    def active_vouchers(self, request):
+        """Get user's active (unredeemed) vouchers"""
+        active_vouchers = self.get_queryset().filter(
+            purchase_status='purchased',
+            redeemed_at__isnull=True
+        ).exclude(expiry_date__lt=timezone.now())
+        serializer = self.get_serializer(active_vouchers, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="redeemed")
+    def redeemed_vouchers(self, request):
+        """Get user's redeemed vouchers"""
+        redeemed_vouchers = self.get_queryset().filter(
+            purchase_status='redeemed'
+        )
+        serializer = self.get_serializer(redeemed_vouchers, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="expired")
+    def expired_vouchers(self, request):
+        """Get user's expired vouchers"""
+        expired_vouchers = self.get_queryset().filter(
+            purchase_status='purchased',
+            expiry_date__lt=timezone.now()
+        )
+        serializer = self.get_serializer(expired_vouchers, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="cancelled")
+    def cancelled_vouchers(self, request):
+        """Get user's cancelled vouchers"""
+        cancelled_vouchers = self.get_queryset().filter(
+            purchase_status='cancelled'
+        )
+        serializer = self.get_serializer(cancelled_vouchers, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="refunded")
+    def refunded_vouchers(self, request):
+        """Get user's refunded vouchers"""
+        refunded_vouchers = self.get_queryset().filter(
+            purchase_status='refunded'
+        )
+        serializer = self.get_serializer(refunded_vouchers, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="gift-cards")
+    def gift_cards(self, request):
+        """Get user's gift cards"""
+        gift_cards = self.get_queryset().filter(
+            is_gift_voucher=True
+        )
+        serializer = self.get_serializer(gift_cards, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="history")
+    def purchase_history(self, request):
+        """Get detailed purchase history"""
+        history = self.get_queryset()
+        
+        # Apply filters if provided
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            history = history.filter(purchase_status=status_filter)
+        
+        date_from = request.query_params.get('date_from')
+        if date_from:
+            history = history.filter(purchased_at__gte=date_from)
+        
+        date_to = request.query_params.get('date_to')
+        if date_to:
+            history = history.filter(purchased_at__lte=date_to)
+        
+        serializer = PurchaseHistorySerializer(history, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="summary")
+    def purchase_summary(self, request):
+        """Get purchase summary statistics"""
+        user_vouchers = self.get_queryset()
+        
+        summary = {
+            "total_purchases": user_vouchers.count(),
+            "total_spent": sum(v.purchase_cost for v in user_vouchers),
+            "active_vouchers": user_vouchers.filter(
+                purchase_status='purchased',
+                redeemed_at__isnull=True
+            ).exclude(expiry_date__lt=timezone.now()).count(),
+            "redeemed_vouchers": user_vouchers.filter(purchase_status='redeemed').count(),
+            "expired_vouchers": user_vouchers.filter(
+                purchase_status='purchased',
+                expiry_date__lt=timezone.now()
+            ).count(),
+            "cancelled_vouchers": user_vouchers.filter(purchase_status='cancelled').count(),
+            "refunded_vouchers": user_vouchers.filter(purchase_status='refunded').count(),
+            "total_refunds": sum(v.purchase_cost for v in user_vouchers.filter(purchase_status='refunded')),
+            "gift_cards": user_vouchers.filter(is_gift_voucher=True).count()
+        }
+        
+        return Response(summary)
 
 
 class WhatsAppContactViewSet(viewsets.ModelViewSet):
@@ -396,4 +831,3 @@ class AdvertisementViewSet(viewsets.ModelViewSet):
                 {"error": "Failed to fetch advertisements by location"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
