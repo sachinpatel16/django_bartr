@@ -90,3 +90,4 @@ django-import-export
 django-celery-results
 setuptools
 psycopg2-binary==2.9.9
+gunicorn>=20.0.0
