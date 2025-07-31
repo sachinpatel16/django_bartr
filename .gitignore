@@ -73,7 +73,7 @@ target/
 
 # Env config file
 env.config
-# .env
+.env
 ./config/settings/firebase-ngo.json
 firebase-ngo.json
 
