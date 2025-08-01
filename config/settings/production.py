@@ -1,14 +1,13 @@
 from .base import * # NOQA
 
 # SECURITY WARNING: don't run with debug turned on in production!
-#DEBUG = True
-DEBUG = False
+DEBUG = True
+
 
 #ALLOWED_HOSTS = env.list('ALLOWED_HOSTS')
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['localhost','127.0.0.1','0.0.0.0','bartrlatest-8l446.sevalla.app','api.bartr.club']  
 
 # SECURITY WARNING: restrict to only your trusted origins in production!
-CSRF_TRUSTED_ORIGINS = ['https://*.kinsta.app', 'https://*.sevalla.app']
 
 # ADMINS
 ADMINS = env.json('ADMINS')
