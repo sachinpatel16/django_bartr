@@ -6,8 +6,8 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
+# from django.http import JsonResponse
+# from django.views.decorators.csrf import csrf_exempt
 
 
 from drf_yasg import openapi  # type: ignore
@@ -30,7 +30,7 @@ schema_view = get_schema_view(
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('health/', csrf_exempt(lambda request: JsonResponse({'status': 'healthy', 'message': 'Django application is running'})), name='health-check'),
+    # path('health/', csrf_exempt(lambda request: JsonResponse({'status': 'healthy', 'message': 'Django application is running'})), name='health-check'),
     path('swagger/', login_required(schema_view.with_ui('swagger', cache_timeout=0)), name='schema-swagger-ui'),
     path('accounts/login/', lambda request: redirect(f'/admin/login/?next=/swagger/')),  # Redirect to admin login with next parameter
     path('accounts/', include('django.contrib.auth.urls')),
