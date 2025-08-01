@@ -5,7 +5,7 @@ DEBUG = True
 
 
 #ALLOWED_HOSTS = env.list('ALLOWED_HOSTS')
-ALLOWED_HOSTS = ['localhost','127.0.0.1','0.0.0.0','bartrlatest-8l446.sevalla.app','api.bartr.club']  
+ALLOWED_HOSTS = ['localhost','127.0.0.1','0.0.0.0','bartrlatest-8l446.sevalla.app','api.bartr.club', 'bartr-t2shu.sevalla.app']  
 
 # SECURITY WARNING: restrict to only your trusted origins in production!
 
