@@ -4,7 +4,11 @@ from .base import * # NOQA
 #DEBUG = True
 DEBUG = False
 
-ALLOWED_HOSTS = env.list('ALLOWED_HOSTS')
+#ALLOWED_HOSTS = env.list('ALLOWED_HOSTS')
+ALLOWED_HOSTS = ['*']
+
+# SECURITY WARNING: restrict to only your trusted origins in production!
+CSRF_TRUSTED_ORIGINS = ['https://*.kinsta.app', 'https://*.sevalla.app']
 
 # ADMINS
 ADMINS = env.json('ADMINS')
