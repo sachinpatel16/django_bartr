@@ -9,7 +9,7 @@ from rest_framework.serializers import ModelSerializer
 
 from freelancing.custom_auth.models import (ApplicationUser, CustomPermission,
                                             MerchantProfile, Wallet,
-                                            Category, WalletHistory
+                                            Category, WalletHistory,RazorpayTransaction
                                         )
 from freelancing.utils.validation import UniqueNameMixin
 
@@ -272,9 +272,19 @@ class UserPasswordResetSerializer(serializers.Serializer):
             raise serializers.ValidationError("Token is not Valide or Expier")
 
 class CategorySerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+    
     class Meta:
         model = Category
-        fields = ['id', 'name', 'description', 'is_active', 'create_time', 'update_time']
+        fields = ['id', 'name', 'description', 'image', 'image_url', 'is_active', 'create_time', 'update_time']
+    
+    def get_image_url(self, obj):
+        if obj.image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
+        return None
 
 def validate_gst_number(value):
     """Validate GST number format"""
@@ -349,3 +359,97 @@ class WalletHistorySerializer(serializers.ModelSerializer):
         fields = [
             "id", "transaction_type", "amount", "reference_note", "reference_id", "meta", 'create_time'
             ]
+
+
+class MerchantListingSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='user.fullname', read_only=True)
+    user_email = serializers.CharField(source='user.email', read_only=True)
+    user_phone = serializers.CharField(source='user.phone', read_only=True)
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    category_image = serializers.SerializerMethodField()
+    logo_url = serializers.SerializerMethodField()
+    banner_url = serializers.SerializerMethodField()
+    distance = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = MerchantProfile
+        fields = [
+            'id', 'user', 'user_name', 'user_email', 'user_phone', 'category', 'category_name', 
+            'category_image', 'business_name', 'email', 'phone', 'gender', 'gst_number', 
+            'fssai_number', 'address', 'area', 'pin', 'city', 'state', 'latitude', 'longitude', 
+            'logo', 'logo_url', 'banner_image', 'banner_url', 'distance', 'is_active', 
+            'create_time', 'update_time'
+        ]
+        read_only_fields = ['user', 'user_name', 'user_email', 'user_phone', 'category_name', 
+                            'category_image', 'logo_url', 'banner_url', 'distance']
+    
+    def get_category_image(self, obj):
+        if obj.category and obj.category.image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.category.image.url)
+            return obj.category.image.url
+        return None
+    
+    def get_logo_url(self, obj):
+        if obj.logo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.logo.url)
+            return obj.logo.url
+        return None
+    
+    def get_banner_url(self, obj):
+        if obj.banner_image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.banner_image.url)
+            return obj.banner_image.url
+        return None
+    
+    def get_distance(self, obj):
+        # This can be calculated based on user's location if provided
+        # For now, returning None - can be implemented later
+        return None
+
+
+class RazorpayOrderSerializer(serializers.Serializer):
+    """Serializer for creating Razorpay order"""
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=1.0)
+    currency = serializers.CharField(default='INR', max_length=3)
+    description = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    receipt = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    notes = serializers.JSONField(required=False)
+
+    def validate_amount(self, value):
+        """Validate amount and ensure it's at least 1 rupee"""
+        if value < 1:
+            raise serializers.ValidationError("Amount must be at least ₹1")
+        return value
+
+
+class RazorpayPaymentVerificationSerializer(serializers.Serializer):
+    """Serializer for verifying Razorpay payment"""
+    razorpay_order_id = serializers.CharField(max_length=255)
+    razorpay_payment_id = serializers.CharField(max_length=255)
+    razorpay_signature = serializers.CharField(max_length=255)
+
+
+class RazorpayTransactionSerializer(serializers.ModelSerializer):
+    """Serializer for Razorpay transaction model"""
+    user_name = serializers.CharField(source='user.fullname', read_only=True)
+    user_email = serializers.CharField(source='user.email', read_only=True)
+    
+    class Meta:
+        model = RazorpayTransaction
+        fields = [
+            'id', 'user', 'user_name', 'user_email', 'wallet', 'razorpay_order_id',
+            'razorpay_payment_id', 'razorpay_signature', 'amount', 'points_to_add',
+            'currency', 'status', 'description', 'receipt', 'notes', 'error_code',
+            'error_description', 'create_time', 'update_time'
+        ]
+        read_only_fields = [
+            'id', 'user', 'user_name', 'user_email', 'wallet', 'razorpay_order_id',
+            'razorpay_payment_id', 'razorpay_signature', 'points_to_add', 'status',
+            'error_code', 'error_description', 'create_time', 'update_time'
+        ]

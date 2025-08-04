@@ -156,7 +156,7 @@ class VoucherViewSet(viewsets.ModelViewSet):
             return f"Free {voucher.product_name}"
         return "Special offer"
 
-    @action(detail=False, methods=["get"], url_path="popular", permission_classes=[permissions.AllowAny,
+    @action(detail=False, methods=["get"], url_path="popular", permission_classes=[
                                                                 IsAPIKEYAuthenticated])
     def popular_vouchers(self, request):
         try:
@@ -185,8 +185,7 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
     """Public API for users to browse and purchase vouchers"""
     queryset = Voucher.objects.filter(is_active=True, is_gift_card=False)
     serializer_class = VoucherListSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
-    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAPIKEYAuthenticated]
     filter_backends = (DjangoFilterBackend, SearchFilter)
     search_fields = ["title", "message", "merchant__business_name"]
     filterset_fields = ["voucher_type", "category", "merchant"]
@@ -222,14 +221,14 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
         
         return queryset
 
-    @action(detail=False, methods=["get"], url_path="categories")
+    @action(detail=False, methods=["get"], url_path="type", permission_classes=[IsAPIKEYAuthenticated])
     def voucher_categories(self, request):
         """Get all voucher categories"""
         categories = VoucherType.objects.filter(is_active=True)
         serializer = VoucherTypeSerializer(categories, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=["get"], url_path="featured")
+    @action(detail=False, methods=["get"], url_path="featured", permission_classes=[IsAPIKEYAuthenticated])
     def featured_vouchers(self, request):
         """Get featured vouchers (most popular)"""
         featured = self.get_queryset().filter(
@@ -238,7 +237,7 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = self.get_serializer(featured, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=["get"], url_path="nearby")
+    @action(detail=False, methods=["get"], url_path="nearby", permission_classes=[IsAPIKEYAuthenticated])
     def nearby_vouchers(self, request):
         """Get vouchers from nearby merchants"""
         # This would require location-based filtering

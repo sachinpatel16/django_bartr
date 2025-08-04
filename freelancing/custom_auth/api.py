@@ -1,4 +1,7 @@
 import random
+import razorpay
+import hashlib
+import hmac
 from typing import Type
 
 from django.db.models import Q
@@ -23,12 +26,13 @@ from rest_framework.response import Response
 from rest_framework.serializers import BaseSerializer
 from rest_framework.status import HTTP_200_OK
 from rest_framework.views import APIView
+from rest_framework.generics import ListAPIView
 from rest_framework_simplejwt.tokens import RefreshToken # type: ignore
 from templated_email import send_templated_mail
 
 from freelancing.custom_auth.models import (ApplicationUser, LoginOtp, CustomBlacklistedToken,
                                          CustomPermission, Wallet, MerchantProfile, Category,
-                                        WalletHistory)
+                                        WalletHistory, RazorpayTransaction)
 from freelancing.custom_auth.permissions import IsSelf
 from freelancing.custom_auth.serializers import (BaseUserSerializer,
                                                 ChangePasswordSerializer,
@@ -38,13 +42,17 @@ from freelancing.custom_auth.serializers import (BaseUserSerializer,
                                                 UserStatisticSerializerMixin,
                                                 CustomPermissionSerializer, SendPasswordResetEmailSerializer,
                                                 UserPasswordResetSerializer, MerchantProfileSerializer, WalletSerializer,
-                                                CategorySerializer, WalletHistorySerializer
-                                            
+                                                CategorySerializer, WalletHistorySerializer, MerchantListingSerializer,
+                                                RazorpayOrderSerializer, RazorpayPaymentVerificationSerializer,
+                                                RazorpayTransactionSerializer
                                             )
 # from trade_time_accounting.notification.FCM_manager import unsubscribe_from_topic
 from freelancing.registrations.serializers import CheckOtp
 from freelancing.utils.permissions import IsAPIKEYAuthenticated, IsReadAction, IsSuperAdminUser
 from freelancing.utils.serializers import add_serializer_mixin
+
+from django.db.models import F, FloatField, ExpressionWrapper
+from django.db.models.functions import ACos, Cos, Radians, Sin
 
 from rest_framework_simplejwt.authentication import JWTAuthentication # type: ignore
 User = get_user_model()
@@ -484,11 +492,11 @@ class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.filter(is_active=True)
     serializer_class = CategorySerializer
     permission_classes = [
-        permissions.IsAuthenticated,
         IsAPIKEYAuthenticated,
     ]
-    authentication_classes = [JWTAuthentication]
+    http_method_names = ['get']
     filter_backends = (DjangoFilterBackend, SearchFilter)
+    parser_classes = (MultiPartParser, FormParser)
 
 # Create your views here.
 class MerchantProfileViewSet(viewsets.ModelViewSet):
@@ -604,3 +612,220 @@ class WalletSummaryView(APIView):
             "balance": wallet.balance,
             "recent_transactions": serializer.data
         })
+
+
+class MerchantListAPIView(ListAPIView):
+    serializer_class = MerchantListingSerializer
+    permission_classes = [IsAPIKEYAuthenticated]
+
+    def get_queryset(self):
+        queryset = MerchantProfile.objects.filter(user__is_active=True)
+
+        # Category Filter
+        category_id = self.request.query_params.get('category')
+        if category_id:
+            queryset = queryset.filter(category_id=category_id)
+
+        # Latitude/Longitude (Optional)
+        user_lat = self.request.query_params.get('latitude')
+        user_lng = self.request.query_params.get('longitude')
+
+        if user_lat and user_lng:
+            try:
+                user_lat = float(user_lat)
+                user_lng = float(user_lng)
+
+                # Ignore merchants without valid lat/lng
+                queryset = queryset.filter(latitude__isnull=False, longitude__isnull=False)
+
+                # Haversine Formula
+                distance_expr = 6371 * ACos(
+                    Cos(Radians(user_lat)) *
+                    Cos(Radians(F('latitude'))) *
+                    Cos(Radians(F('longitude')) - Radians(user_lng)) +
+                    Sin(Radians(user_lat)) *
+                    Sin(Radians(F('latitude')))
+                )
+
+                queryset = queryset.annotate(
+                    distance=ExpressionWrapper(distance_expr, output_field=FloatField())
+                ).order_by('distance')
+
+            except (ValueError, TypeError):
+                # If conversion fails, just skip distance logic
+                pass
+
+        return queryset
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+
+class RazorpayWalletAPIView(APIView):
+    """API for Razorpay wallet operations"""
+    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Initialize Razorpay client
+        self.client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+
+    def post(self, request):
+        """Create Razorpay order for adding points to wallet"""
+        serializer = RazorpayOrderSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        user = request.user
+        amount = serializer.validated_data['amount']
+        
+        # Get or create wallet for user
+        wallet, created = Wallet.objects.get_or_create(user=user)
+        
+        # Create Razorpay order
+        order_data = {
+            'amount': int(amount * 100),  # Convert to paise
+            'currency': serializer.validated_data.get('currency', 'INR'),
+            'receipt': f'wallet_recharge_{user.id}_{int(timezone.now().timestamp())}',
+            'notes': {
+                'user_id': str(user.id),
+                'wallet_id': str(wallet.id),
+                'type': 'wallet_recharge'
+            }
+        }
+        
+        if serializer.validated_data.get('description'):
+            order_data['notes']['description'] = serializer.validated_data['description']
+        
+        try:
+            razorpay_order = self.client.order.create(data=order_data)
+            
+            # Create transaction record
+            transaction = RazorpayTransaction.objects.create(
+                user=user,
+                wallet=wallet,
+                razorpay_order_id=razorpay_order['id'],
+                amount=amount,
+                points_to_add=amount,  # 1 rupee = 1 point
+                currency=order_data['currency'],
+                description=serializer.validated_data.get('description', ''),
+                receipt=order_data['receipt'],
+                notes=order_data['notes']
+            )
+            
+            return Response({
+                'success': True,
+                'data': {
+                    'order_id': razorpay_order['id'],
+                    'amount': amount,
+                    'currency': order_data['currency'],
+                    'receipt': order_data['receipt'],
+                    'transaction_id': transaction.id
+                }
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class RazorpayPaymentVerificationAPIView(APIView):
+    """API for verifying Razorpay payment and adding points to wallet"""
+    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Initialize Razorpay client
+        self.client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+
+    def post(self, request):
+        """Verify Razorpay payment and add points to wallet"""
+        serializer = RazorpayPaymentVerificationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        user = request.user
+        order_id = serializer.validated_data['razorpay_order_id']
+        payment_id = serializer.validated_data['razorpay_payment_id']
+        signature = serializer.validated_data['razorpay_signature']
+        
+        try:
+            # Get transaction record
+            transaction = RazorpayTransaction.objects.get(
+                razorpay_order_id=order_id,
+                user=user,
+                status='pending'
+            )
+            
+            # Verify signature
+            expected_signature = hmac.new(
+                settings.RAZORPAY_KEY_SECRET.encode(),
+                f"{order_id}|{payment_id}".encode(),
+                hashlib.sha256
+            ).hexdigest()
+            
+            if not hmac.compare_digest(expected_signature, signature):
+                transaction.mark_failed('INVALID_SIGNATURE', 'Payment signature verification failed')
+                return Response({
+                    'success': False,
+                    'error': 'Invalid payment signature'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Verify payment with Razorpay
+            payment = self.client.payment.fetch(payment_id)
+            
+            if payment['status'] != 'captured':
+                transaction.mark_failed('PAYMENT_NOT_CAPTURED', f"Payment status: {payment['status']}")
+                return Response({
+                    'success': False,
+                    'error': f"Payment not captured. Status: {payment['status']}"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Mark transaction as successful and add points
+            transaction.mark_successful(payment_id, signature)
+            
+            return Response({
+                'success': True,
+                'data': {
+                    'transaction_id': transaction.id,
+                    'amount': transaction.amount,
+                    'points_added': transaction.amount,
+                    'wallet_balance': transaction.wallet.balance,
+                    'payment_id': payment_id
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except RazorpayTransaction.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Transaction not found or already processed'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class RazorpayTransactionListView(generics.ListAPIView):
+    """API for listing user's Razorpay transactions"""
+    serializer_class = RazorpayTransactionSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    authentication_classes = [JWTAuthentication]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['status', 'currency']
+    ordering_fields = ['create_time', 'amount']
+    ordering = ['-create_time']
+
+    def get_queryset(self):
+        user = self.request.user
+        return RazorpayTransaction.objects.filter(user=user)
