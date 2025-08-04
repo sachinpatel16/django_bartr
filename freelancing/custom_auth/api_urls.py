@@ -7,8 +7,8 @@ from freelancing.custom_auth import api
 
 router = routers.SimpleRouter()
 router.register("v1/auth", api.UserAuthViewSet, basename="auth")
-router.register("v1/users", api.UserViewSet, basename="users")
-router.register("v1/custom_permission", api.CustomPermissionViewSet, basename="custom_permission")
+# router.register("v1/users", api.UserViewSet, basename="users")
+# router.register("v1/custom_permission", api.CustomPermissionViewSet, basename="custom_permission")
 
 #Merchant Profile
 router.register("v1/merchant_profile", api.MerchantProfileViewSet, basename="merchant_profile")
@@ -21,16 +21,23 @@ app_name = "custom-auth"
 
 urlpatterns = [
     # JWT Token Endpoints
-    path('v1/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('v1/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    # path('v1/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    # path('v1/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     # path('v1/user_access_permissions/', UserAccessPermissionAPIView.as_view(), name='user-access-permissions'),
-    path("v1/user/reset/", api.SendPasswordResetEmailView.as_view(), name="user_reset"),
-    path(
-        "v1/user/reset/<uid>/<token>/",
-        api.UserPasswordResetView.as_view(),
-        name="user_reset_view",
-    ),
+    # path("v1/user/reset/", api.SendPasswordResetEmailView.as_view(), name="user_reset"),
+    # path(
+    #     "v1/user/reset/<uid>/<token>/",
+    #     api.UserPasswordResetView.as_view(),
+    #     name="user_reset_view",
+    # ),
     path("v1/wallet/history/", api.WalletHistoryListView.as_view(), name="wallet-history"),
     path("v1/wallet/summary/", api.WalletSummaryView.as_view(), name="wallet-summary"),
+    path('v1/merchants/list/', api.MerchantListAPIView.as_view(), name='merchant-list'),
+    
+    # Razorpay Wallet APIs
+    path("v1/wallet/razorpay/create-order/", api.RazorpayWalletAPIView.as_view(), name="razorpay-create-order"),
+    path("v1/wallet/razorpay/verify-payment/", api.RazorpayPaymentVerificationAPIView.as_view(), name="razorpay-verify-payment"),
+    path("v1/wallet/razorpay/transactions/", api.RazorpayTransactionListView.as_view(), name="razorpay-transactions"),
+    
     path("", include(router.urls))
 ]

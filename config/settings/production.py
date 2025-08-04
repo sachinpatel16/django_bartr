@@ -3,11 +3,15 @@ from .base import * # NOQA
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
+ALLOWED_HOSTS = ['localhost','127.0.0.1','0.0.0.0','bartrlatest-8l446.sevalla.app','api.bartr.club']
 
-#ALLOWED_HOSTS = env.list('ALLOWED_HOSTS')
-ALLOWED_HOSTS = ['localhost','127.0.0.1','0.0.0.0','bartrlatest-8l446.sevalla.app','api.bartr.club', 'bartr-t2shu.sevalla.app']  
+CSRF_TRUSTED_ORIGINS = [
+    'https://*.kinsta.app',
+    'https://*.sevalla.app',
+    'https://bartrlatest-8l446.sevalla.app',
+    'http://api.bartr.club'
+]
 
-# SECURITY WARNING: restrict to only your trusted origins in production!
 
 # ADMINS
 ADMINS = env.json('ADMINS')

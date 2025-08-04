@@ -262,6 +262,7 @@ class ApplicationUser(AbstractBaseUser, UserPhotoMixin, PermissionsMixin):
 class Category(BaseModel):
     name = models.CharField(_("Category Name"), max_length=100, unique=True)
     description = models.TextField(_("Description"), blank=True, null=True)
+    image = models.ImageField(_("Category Image"), upload_to="categories/", null=True, blank=True)
 
     class Meta:
         verbose_name = _("Category")
@@ -306,17 +307,18 @@ class MerchantProfile(BaseModel):
 
 class Wallet(BaseModel):
     user = models.OneToOneField(ApplicationUser, on_delete=models.CASCADE, related_name='wallet')
-    balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)  # This is points balance
 
     def __str__(self):
         if self.user:
-            return f"Wallet of {self.user.fullname} - ₹{self.balance}"
+            return f"Wallet of {self.user.fullname} - {self.balance} points"
         else:
-            return f"Orphaned Wallet - ₹{self.balance}"
+            return f"Orphaned Wallet - {self.balance} points"
 
     def deduct(self, amount: Decimal, note=None, ref_id=None):
+        """Deduct points from wallet"""
         if self.balance < amount:
-            raise ValidationError("Insufficient balance in wallet.")
+            raise ValidationError("Insufficient points in wallet.")
         self.balance -= amount
         self.save()
         WalletHistory.objects.create(
@@ -328,6 +330,7 @@ class Wallet(BaseModel):
         )
 
     def credit(self, amount: Decimal, note=None, ref_id=None):
+        """Add points to wallet"""
         self.balance += amount
         self.save()
         WalletHistory.objects.create(
@@ -337,6 +340,14 @@ class Wallet(BaseModel):
             reference_note=note,
             reference_id=ref_id
         )
+
+    def add_points(self, points: Decimal, note=None, ref_id=None):
+        """Add points to wallet (1 rupee = 1 point)"""
+        self.credit(points, note, ref_id)
+
+    def deduct_points(self, points: Decimal, note=None, ref_id=None):
+        """Deduct points from wallet"""
+        self.deduct(points, note, ref_id)
 class WalletHistory(BaseModel):
     TRANSACTION_CHOICES = (
         ('credit', 'Credit'),
@@ -351,6 +362,66 @@ class WalletHistory(BaseModel):
     meta = models.JSONField(null=True, blank=True) 
     def __str__(self):
         return f"{self.transaction_type.title()} ₹{self.amount}"
+
+
+class RazorpayTransaction(BaseModel):
+    """Model to store Razorpay payment transactions"""
+    TRANSACTION_STATUS = (
+        ('pending', 'Pending'),
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+        ('cancelled', 'Cancelled'),
+    )
+
+    user = models.ForeignKey(ApplicationUser, on_delete=models.CASCADE, related_name='razorpay_transactions')
+    wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='razorpay_transactions')
+    
+    # Razorpay specific fields
+    razorpay_order_id = models.CharField(max_length=255, unique=True)
+    razorpay_payment_id = models.CharField(max_length=255, null=True, blank=True)
+    razorpay_signature = models.CharField(max_length=255, null=True, blank=True)
+    
+    # Transaction details
+    amount = models.DecimalField(max_digits=12, decimal_places=2)  # Amount in rupees
+    points_to_add = models.DecimalField(max_digits=12, decimal_places=2)  # Points to be added (1 rupee = 1 point)
+    currency = models.CharField(max_length=3, default='INR')
+    status = models.CharField(max_length=20, choices=TRANSACTION_STATUS, default='pending')
+    
+    # Additional details
+    description = models.CharField(max_length=255, null=True, blank=True)
+    receipt = models.CharField(max_length=255, null=True, blank=True)
+    notes = models.JSONField(null=True, blank=True)
+    
+    # Error details
+    error_code = models.CharField(max_length=100, null=True, blank=True)
+    error_description = models.TextField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-create_time']
+
+    def __str__(self):
+        return f"Razorpay Transaction - {self.razorpay_order_id} - {self.status}"
+
+    def mark_successful(self, payment_id, signature):
+        """Mark transaction as successful and add points to wallet"""
+        self.status = 'success'
+        self.razorpay_payment_id = payment_id
+        self.razorpay_signature = signature
+        self.save()
+        
+        # Add points to wallet (1 rupee = 1 point)
+        self.wallet.add_points(
+            self.amount,  # Direct amount as points
+            f"Razorpay payment - {self.razorpay_order_id}",
+            self.razorpay_order_id
+        )
+
+    def mark_failed(self, error_code=None, error_description=None):
+        """Mark transaction as failed"""
+        self.status = 'failed'
+        self.error_code = error_code
+        self.error_description = error_description
+        self.save()
 
 class LoginOtp(BaseModel):
     """

@@ -38,6 +38,11 @@ SECRET_KEY = env('SECRET_KEY')
 # --------------------------------------------------------------------------
 API_KEY_SECRET = bytes(env('API_KEY_SECRET'), "utf-8")
 
+# Razorpay Configuration
+# --------------------------------------------------------------------------
+RAZORPAY_KEY_ID = env('RAZORPAY_KEY_ID', default='')
+RAZORPAY_KEY_SECRET = env('RAZORPAY_KEY_SECRET', default='')
+
 # Application definition
 
 DJANGO_APPS = [
