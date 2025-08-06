@@ -51,7 +51,7 @@ from freelancing.registrations.serializers import CheckOtp
 from freelancing.utils.permissions import IsAPIKEYAuthenticated, IsReadAction, IsSuperAdminUser
 from freelancing.utils.serializers import add_serializer_mixin
 
-from django.db.models import F, FloatField, ExpressionWrapper
+from django.db.models import F, FloatField, ExpressionWrapper, Count
 from django.db.models.functions import ACos, Cos, Radians, Sin
 
 from rest_framework_simplejwt.authentication import JWTAuthentication # type: ignore
@@ -621,10 +621,39 @@ class MerchantListAPIView(ListAPIView):
     def get_queryset(self):
         queryset = MerchantProfile.objects.filter(user__is_active=True)
 
+        # Annotate with available vouchers count
+        queryset = queryset.annotate(
+            available_vouchers_count=Count(
+                'vouchers',
+                filter=Q(
+                    vouchers__is_active=True,
+                    vouchers__is_gift_card=False
+                ) & (
+                    Q(vouchers__count__isnull=True) |  # No limit
+                    Q(vouchers__redemption_count__lt=F('vouchers__count'))  # Still has available redemptions
+                )
+            )
+        )
+
         # Category Filter
         category_id = self.request.query_params.get('category')
         if category_id:
             queryset = queryset.filter(category_id=category_id)
+
+        # Filter by voucher availability
+        has_vouchers = self.request.query_params.get('has_vouchers')
+        if has_vouchers:
+            if has_vouchers.lower() == 'true':
+                queryset = queryset.filter(available_vouchers_count__gt=0)
+            elif has_vouchers.lower() == 'false':
+                queryset = queryset.filter(available_vouchers_count=0)
+
+        # Order by voucher count if requested
+        order_by = self.request.query_params.get('order_by')
+        if order_by == 'vouchers_desc':
+            queryset = queryset.order_by('-available_vouchers_count')
+        elif order_by == 'vouchers_asc':
+            queryset = queryset.order_by('available_vouchers_count')
 
         # Latitude/Longitude (Optional)
         user_lat = self.request.query_params.get('latitude')

@@ -370,19 +370,20 @@ class MerchantListingSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
     banner_url = serializers.SerializerMethodField()
     distance = serializers.SerializerMethodField()
-    
+    available_vouchers_count = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = MerchantProfile
         fields = [
-            'id', 'user', 'user_name', 'user_email', 'user_phone', 'category', 'category_name', 
-            'category_image', 'business_name', 'email', 'phone', 'gender', 'gst_number', 
-            'fssai_number', 'address', 'area', 'pin', 'city', 'state', 'latitude', 'longitude', 
-            'logo', 'logo_url', 'banner_image', 'banner_url', 'distance', 'is_active', 
+            'id', 'user', 'user_name', 'user_email', 'user_phone', 'category', 'category_name',
+            'category_image', 'business_name', 'email', 'phone', 'gender', 'gst_number',
+            'fssai_number', 'address', 'area', 'pin', 'city', 'state', 'latitude', 'longitude',
+            'logo', 'logo_url', 'banner_image', 'banner_url', 'distance', 'available_vouchers_count', 'is_active',
             'create_time', 'update_time'
         ]
-        read_only_fields = ['user', 'user_name', 'user_email', 'user_phone', 'category_name', 
-                            'category_image', 'logo_url', 'banner_url', 'distance']
-    
+        read_only_fields = ['user', 'user_name', 'user_email', 'user_phone', 'category_name',
+                            'category_image', 'logo_url', 'banner_url', 'distance', 'available_vouchers_count']
+   
     def get_category_image(self, obj):
         if obj.category and obj.category.image:
             request = self.context.get('request')
@@ -390,7 +391,7 @@ class MerchantListingSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.category.image.url)
             return obj.category.image.url
         return None
-    
+   
     def get_logo_url(self, obj):
         if obj.logo:
             request = self.context.get('request')
@@ -398,7 +399,7 @@ class MerchantListingSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.logo.url)
             return obj.logo.url
         return None
-    
+   
     def get_banner_url(self, obj):
         if obj.banner_image:
             request = self.context.get('request')
@@ -406,7 +407,7 @@ class MerchantListingSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.banner_image.url)
             return obj.banner_image.url
         return None
-    
+   
     def get_distance(self, obj):
         # This can be calculated based on user's location if provided
         # For now, returning None - can be implemented later
