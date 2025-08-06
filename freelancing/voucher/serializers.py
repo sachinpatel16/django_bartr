@@ -27,15 +27,16 @@ class VoucherListSerializer(serializers.ModelSerializer):
     purchase_cost = serializers.SerializerMethodField()
     is_purchased = serializers.SerializerMethodField()
     can_purchase = serializers.SerializerMethodField()
+    popularity_info = serializers.SerializerMethodField()
    
     class Meta:
         model = Voucher
         fields = [
             'id', 'uuid', 'title', 'message', 'merchant_name', 'merchant_logo',
             'voucher_type_name', 'display_image', 'voucher_value', 'purchase_cost',
-            'is_purchased', 'can_purchase', 'redemption_count', 'count',
+            'is_purchased', 'can_purchase', 'purchase_count', 'redemption_count', 'count',
             'percentage_value', 'percentage_min_bill', 'flat_amount', 'flat_min_bill',
-            'product_name', 'product_min_bill', 'category', 'create_time'
+            'product_name', 'product_min_bill', 'category', 'create_time', 'popularity_info'
         ]
    
     def get_merchant_logo(self, obj):
@@ -108,6 +109,16 @@ class VoucherListSerializer(serializers.ModelSerializer):
             return wallet.balance >= cost
         except Wallet.DoesNotExist:
             return False
+
+    def get_popularity_info(self, obj):
+        """Get popularity information for the voucher"""
+        return {
+            'purchase_count': obj.purchase_count,
+            'redemption_count': obj.redemption_count,
+            'popularity_score': obj.get_popularity_score(),
+            'redemption_rate': obj.get_redemption_rate(),
+            'is_popular': obj.purchase_count >= 10  # Consider popular if 10+ purchases
+        }
 
 class VoucherPurchaseSerializer(serializers.Serializer):
     """Serializer for purchasing vouchers with enhanced validation"""
@@ -390,35 +401,7 @@ class VoucherCreateSerializer(serializers.ModelSerializer):
         validated_data["merchant"] = merchant_profile
         validated_data["category"] = merchant_profile.category
 
-        # Determine cost
-        is_gift_card = validated_data.get("is_gift_card", False)
-        cost_key = "gift_card_cost" if is_gift_card else "voucher_cost"
-        try:
-            voucher_cost_setting = SiteSetting.get_value(cost_key, "10")
-            cost_value = Decimal(str(voucher_cost_setting))
-        except (InvalidOperation, ValueError, TypeError):
-            # If there's any issue with the setting, use default value
-            cost_value = Decimal("10")
-
-        # Get user's wallet (common wallet for both user and merchant)
-        wallet = Wallet.objects.filter(user=user).first()
-       
-        if not wallet:
-            raise serializers.ValidationError("User wallet not found.")
-
-        # Check if user has sufficient balance
-        if wallet.balance < cost_value:
-            raise serializers.ValidationError(
-                f"Insufficient balance. Required: ₹{cost_value}, Available: ₹{wallet.balance}"
-            )
-
-        # Deduct points from wallet
-        try:
-            wallet.deduct(cost_value, note="Voucher Creation", ref_id=str(validated_data.get("title")))
-        except ValidationError as e:
-            raise serializers.ValidationError(str(e))
-
-        # Create voucher
+        # Create voucher without deducting points from wallet
         voucher = super().create(validated_data)
         return voucher
 

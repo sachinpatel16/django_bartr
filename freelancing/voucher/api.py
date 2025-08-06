@@ -21,6 +21,7 @@ from freelancing.voucher.serializers import (
 )
 from freelancing.custom_auth.models import Wallet, SiteSetting
 from rest_framework.filters import SearchFilter
+from django.db import models
 
 class VoucherViewSet(viewsets.ModelViewSet):
     queryset = Voucher.objects.all()
@@ -41,6 +42,65 @@ class VoucherViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save()
+
+    @action(detail=False, methods=["get"], url_path="statistics", permission_classes=[IsAPIKEYAuthenticated])
+    def voucher_statistics(self, request):
+        """Get voucher statistics for the merchant"""
+        try:
+            merchant_vouchers = self.get_queryset()
+            
+            # Calculate statistics
+            total_vouchers = merchant_vouchers.count()
+            total_purchases = merchant_vouchers.aggregate(
+                total=models.Sum('purchase_count')
+            )['total'] or 0
+            total_redemptions = merchant_vouchers.aggregate(
+                total=models.Sum('redemption_count')
+            )['total'] or 0
+            
+            # Get top performing vouchers
+            top_vouchers = merchant_vouchers.annotate(
+                popularity_score=models.F('purchase_count') * 2 + models.F('redemption_count')
+            ).order_by('-popularity_score')[:5]
+            
+            # Get recent activity (last 30 days)
+            from datetime import timedelta
+            thirty_days_ago = timezone.now() - timedelta(days=30)
+            recent_purchases = UserVoucherRedemption.objects.filter(
+                voucher__in=merchant_vouchers,
+                purchased_at__gte=thirty_days_ago
+            ).count()
+            
+            recent_redemptions = UserVoucherRedemption.objects.filter(
+                voucher__in=merchant_vouchers,
+                redeemed_at__gte=thirty_days_ago
+            ).count()
+            
+            data = {
+                "total_vouchers": total_vouchers,
+                "total_purchases": total_purchases,
+                "total_redemptions": total_redemptions,
+                "redemption_rate": round((total_redemptions / total_purchases * 100) if total_purchases > 0 else 0, 2),
+                "recent_activity": {
+                    "purchases_last_30_days": recent_purchases,
+                    "redemptions_last_30_days": recent_redemptions
+                },
+                "top_performing_vouchers": [{
+                    "id": v.id,
+                    "title": v.title,
+                    "purchase_count": v.purchase_count,
+                    "redemption_count": v.redemption_count,
+                    "popularity_score": v.purchase_count * 2 + v.redemption_count
+                } for v in top_vouchers]
+            }
+            
+            return Response(data)
+            
+        except Exception as e:
+            return Response(
+                {"error": "Failed to fetch voucher statistics"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=True, methods=["post"], url_path="redeem", permission_classes=[permissions.AllowAny,
                                                                 IsAPIKEYAuthenticated])
@@ -160,21 +220,36 @@ class VoucherViewSet(viewsets.ModelViewSet):
                                                                 IsAPIKEYAuthenticated])
     def popular_vouchers(self, request):
         try:
-            # Fixed: Use redemption_count instead of count for filtering
+            # Get popular vouchers based on purchase count and redemption count
+            # Only include vouchers that have been used (purchased or redeemed)
+            # Priority: purchase_count (most important), then redemption_count
             top_vouchers = Voucher.objects.filter(
-                redemption_count__gt=0,
-                is_gift_card=False  # Exclude gift cards from public listing
-            ).order_by("-redemption_count")[:10]
+                is_gift_card=False,  # Exclude gift cards from public listing
+                is_active=True
+            ).filter(
+                # Only include vouchers that have been used (purchased or redeemed)
+                models.Q(purchase_count__gt=0) | models.Q(redemption_count__gt=0)
+            ).annotate(
+                popularity_score=models.F('purchase_count') * 2 + models.F('redemption_count')
+            ).order_by("-popularity_score", "-purchase_count", "-redemption_count")[:10]
            
             data = [{
                 "id": v.id,
                 "title": v.title,
                 "merchant": v.merchant.business_name,
+                "purchase_count": v.purchase_count,
                 "redemption_count": v.redemption_count,
-                "voucher_type": v.voucher_type.name
+                "popularity_score": v.purchase_count * 2 + v.redemption_count,
+                "voucher_type": v.voucher_type.name,
+                "category": v.category.name if v.category else None,
+                "image": v.get_display_image().url if v.get_display_image() else None
             } for v in top_vouchers]
            
-            return Response(data)
+            return Response({
+                "popular_vouchers": data,
+                "total_count": len(data),
+                "message": "Popular vouchers based on purchase and redemption activity (only used vouchers)"
+            })
         except Exception as e:
             return Response(
                 {"error": "Failed to fetch popular vouchers"},
@@ -230,12 +305,19 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="featured", permission_classes=[IsAPIKEYAuthenticated])
     def featured_vouchers(self, request):
-        """Get featured vouchers (most popular)"""
+        """Get featured vouchers (most popular based on purchase and redemption)"""
+        # Only include vouchers that have been used (purchased or redeemed)
         featured = self.get_queryset().filter(
-            redemption_count__gt=0
-        ).order_by('-redemption_count')[:10]
+            models.Q(purchase_count__gt=0) | models.Q(redemption_count__gt=0)
+        ).annotate(
+            popularity_score=models.F('purchase_count') * 2 + models.F('redemption_count')
+        ).order_by('-popularity_score', '-purchase_count', '-redemption_count')[:10]
         serializer = self.get_serializer(featured, many=True)
-        return Response(serializer.data)
+        return Response({
+            "featured_vouchers": serializer.data,
+            "total_count": len(serializer.data),
+            "message": "Featured vouchers based on popularity (only used vouchers)"
+        })
 
     @action(detail=False, methods=["get"], url_path="nearby", permission_classes=[IsAPIKEYAuthenticated])
     def nearby_vouchers(self, request):
@@ -245,6 +327,30 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
         nearby = self.get_queryset().order_by('-create_time')[:20]
         serializer = self.get_serializer(nearby, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="trending", permission_classes=[IsAPIKEYAuthenticated])
+    def trending_vouchers(self, request):
+        """Get trending vouchers (recent popular purchases in last 7 days)"""
+        from datetime import timedelta
+        
+        # Get vouchers with recent purchases (last 7 days)
+        seven_days_ago = timezone.now() - timedelta(days=7)
+        
+        trending_vouchers = self.get_queryset().filter(
+            user_redemptions__purchased_at__gte=seven_days_ago
+        ).annotate(
+            recent_purchases=models.Count('user_redemptions', filter=models.Q(
+                user_redemptions__purchased_at__gte=seven_days_ago
+            ))
+        ).order_by('-recent_purchases', '-purchase_count')[:10]
+        
+        serializer = self.get_serializer(trending_vouchers, many=True)
+        return Response({
+            "trending_vouchers": serializer.data,
+            "total_count": len(serializer.data),
+            "period": "Last 7 days",
+            "message": "Trending vouchers based on recent purchase activity"
+        })
 
 class VoucherPurchaseViewSet(viewsets.ViewSet):
     """Handle voucher purchases with optimized transaction management"""
@@ -324,7 +430,11 @@ class VoucherPurchaseViewSet(viewsets.ViewSet):
                     wallet.deduct(cost, note=f"Voucher Purchase: {voucher.title}", ref_id=str(voucher.id))
                 except ValidationError as e:
                     raise ValidationError(f"Wallet deduction failed: {str(e)}")
-                # 9. Create redemption record
+                # 9. Increment voucher purchase count atomically
+                voucher.purchase_count = models.F('purchase_count') + 1
+                voucher.save(update_fields=['purchase_count'])
+                
+                # 10. Create redemption record
                 try:
                     redemption = UserVoucherRedemption.objects.create(
                         user=user,

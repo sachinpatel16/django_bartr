@@ -60,14 +60,25 @@ This offer is valid while stocks lasts - McDonald's West and South (Hardcastle R
 
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True, related_name='vouchers')
     redemption_count = models.PositiveIntegerField(default=0)
+    purchase_count = models.PositiveIntegerField(default=0)  # Track total purchases
     
     is_gift_card = models.BooleanField(default=False)  # Hide from frontend listing
 
     def get_display_image(self):
         return self.image or self.merchant.banner_image
 
+    def get_popularity_score(self):
+        """Calculate popularity score based on purchases and redemptions"""
+        return self.purchase_count * 2 + self.redemption_count
+
+    def get_redemption_rate(self):
+        """Calculate redemption rate percentage"""
+        if self.purchase_count > 0:
+            return round((self.redemption_count / self.purchase_count) * 100, 2)
+        return 0.0
+
     def __str__(self):
-        return f"{self.title} - {self.voucher_type.name}"
+        return f"{self.title} - {self.voucher_type.name} (Purchased: {self.purchase_count}, Redeemed: {self.redemption_count})"
 
     class Meta:
         ordering = ['-create_time']
