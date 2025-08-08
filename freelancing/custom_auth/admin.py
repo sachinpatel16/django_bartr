@@ -92,7 +92,16 @@ class UserAdmin(UserAdmin):
                     "is_superuser",
                 )
             },
-        ),  # 'groups', 'user_permissions'
+        ),
+        (
+            "Permissions",
+            {
+                "fields": (
+                    "groups",
+                    "user_permissions",
+                )
+            },
+        ),
         (
             "Account dates",
             {
@@ -129,9 +138,20 @@ class UserAdmin(UserAdmin):
         "date_joined",
         "uuid",
         "last_user_activity",
+        "is_staff",
+        "is_superuser",
         # "is_online",
     )
+    list_filter = (
+        "is_staff",
+        "is_superuser",
+        "is_active",
+        "is_email_verified",
+        "groups",
+        "date_joined",
+    )
     search_fields = ("username", "email", "uuid", "fullname", "phone")
+    filter_horizontal = ("groups", "user_permissions")
 
     def _get_password(self, obj):
         return "Yes" if obj.password not in [None, ""] else "No"
@@ -169,6 +189,3 @@ class UserAdmin(UserAdmin):
 
     is_online.boolean = True
     is_online.admin_order_field = "is_online"
-
-
-admin.site.register(CustomPermission)

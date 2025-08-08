@@ -41,7 +41,7 @@ COPY . .
 RUN mkdir -p /app/staticfiles /app/media
 
 # Collect static files
-RUN python manage.py collectstatic --noinput --settings=config.settings.production
+# RUN python manage.py collectstatic --noinput --settings=config.settings.production
 
 # Create a non-root user
 RUN adduser --disabled-password --gecos '' appuser \

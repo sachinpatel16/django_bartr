@@ -9,7 +9,7 @@ CSRF_TRUSTED_ORIGINS = [
     'https://*.kinsta.app',
     'https://*.sevalla.app',
     'https://bartrlatest-8l446.sevalla.app',
-    'http://api.bartr.club'
+    'https://api.bartr.club'
 ]
 
 
@@ -53,6 +53,7 @@ AWS_AUTO_CREATE_BUCKET = True
 AWS_DEFAULT_ACL = 'public-read'
 AWS_QUERYSTRING_AUTH = False
 AWS_S3_SECURE_URLS = True
+AWS_S3_ENDPOINT_URL = env('AWS_S3_ENDPOINT_URL') 
 
 if USE_CLOUDFRONT:
     AWS_S3_CUSTOM_DOMAIN = env('AWS_S3_CUSTOM_DOMAIN')

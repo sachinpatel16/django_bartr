@@ -401,6 +401,11 @@ class VoucherCreateSerializer(serializers.ModelSerializer):
         validated_data["merchant"] = merchant_profile
         validated_data["category"] = merchant_profile.category
 
+        # Assign default terms and conditions if not provided
+        if not validated_data.get('terms_conditions'):
+            from freelancing.voucher.models import Voucher
+            validated_data["terms_conditions"] = Voucher.DEFAULT_TERMS
+
         # Create voucher without deducting points from wallet
         voucher = super().create(validated_data)
         return voucher
