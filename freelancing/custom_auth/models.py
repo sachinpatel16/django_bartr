@@ -216,7 +216,7 @@ class ApplicationUser(AbstractBaseUser, UserPhotoMixin, PermissionsMixin):
         verbose_name_plural = _("Users")
 
     def __str__(self):
-        return self.email or self.first_name or self.last_name or str(self.uuid)
+        return str(self.phone) or str(self.email) or str(self.first_name) or str(self.last_name) or str(self.id)
 
     def save(self, *args, **kwargs):
         if self.photo and (not self.width_photo or not self.height_photo):
