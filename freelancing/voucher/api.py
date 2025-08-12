@@ -874,28 +874,149 @@ class WhatsAppContactViewSet(viewsets.ModelViewSet):
 
 
 class AdvertisementViewSet(viewsets.ModelViewSet):
-    """Manage voucher advertisements"""
+    """Manage voucher advertisements - requires merchant authentication"""
     queryset = Advertisement.objects.all()
     serializer_class = AdvertisementSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    authentication_classes = [JWTAuthentication]
 
     def get_queryset(self):
         # Only show advertisements for user's vouchers
         return Advertisement.objects.filter(voucher__merchant__user=self.request.user)
 
     def perform_create(self, serializer):
-        # Ensure the voucher belongs to the current user
-        voucher = serializer.validated_data.get('voucher')
-        if voucher.merchant.user != self.request.user:
-            raise ValidationError("You can only create advertisements for your own vouchers")
-        serializer.save()
+        """Create advertisement and deduct points from merchant's wallet"""
+        try:
+            with transaction.atomic():
+                # Ensure the voucher belongs to the current user
+                voucher = serializer.validated_data.get('voucher')
+                if voucher.merchant.user != self.request.user:
+                    raise ValidationError("You can only create advertisements for your own vouchers")
+               
+                # Get merchant's wallet
+                try:
+                    merchant_wallet = Wallet.objects.select_for_update().get(user=self.request.user)
+                except Wallet.DoesNotExist:
+                    raise ValidationError("Merchant wallet not found. Please contact support.")
+               
+                # Get advertisement cost from SiteSetting (default 10 points)
+                try:
+                    advertisement_cost_setting = SiteSetting.get_value("advertisement_cost", "10")
+                    cost = Decimal(str(advertisement_cost_setting))
+                    if cost <= 0:
+                        raise ValidationError("Invalid advertisement cost")
+                except (InvalidOperation, ValueError, TypeError):
+                    # If there's any issue with the setting, use default value
+                    cost = Decimal("10")
+                    if cost <= 0:
+                        raise ValidationError("Invalid advertisement cost")
+               
+                # Check if merchant has sufficient balance
+                if merchant_wallet.balance < cost:
+                    raise ValidationError(
+                        f"Insufficient wallet balance. Required: {cost} points, Available: {merchant_wallet.balance} points"
+                    )
+               
+                # Deduct points from merchant's wallet
+                try:
+                    merchant_wallet.deduct(
+                        cost,
+                        note=f"Advertisement Creation: {voucher.title}",
+                        ref_id=f"AD-{voucher.id}"
+                    )
+                except ValidationError as e:
+                    raise ValidationError(f"Wallet deduction failed: {str(e)}")
+               
+                # Create the advertisement
+                advertisement = serializer.save()
+               
+                # Return success response with wallet info
+                return Response({
+                    "message": "Advertisement created successfully",
+                    "advertisement_id": advertisement.id,
+                    "voucher_title": voucher.title,
+                    "cost_deducted": float(cost),
+                    "remaining_balance": float(merchant_wallet.balance),
+                    "transaction_note": f"Advertisement Creation: {voucher.title}"
+                }, status=status.HTTP_201_CREATED)
+               
+        except ValidationError as e:
+            raise e
+        except Exception as e:
+            raise ValidationError(f"Failed to create advertisement: {str(e)}")
+
+    def perform_update(self, serializer):
+        """Handle advertisement updates with potential cost implications"""
+        try:
+            with transaction.atomic():
+                old_instance = self.get_object()
+                new_data = serializer.validated_data
+               
+                # Check if dates are being extended (which might require additional cost)
+                date_extension_cost = Decimal("0")
+                if 'end_date' in new_data and old_instance.end_date < new_data['end_date']:
+                    # Calculate additional days and cost
+                    additional_days = (new_data['end_date'] - old_instance.end_date).days
+                    if additional_days > 0:
+                        # Get cost per day from settings (default 1 point per day)
+                        cost_per_day = Decimal(SiteSetting.get_value("advertisement_extension_cost_per_day", "1"))
+                        date_extension_cost = additional_days * cost_per_day
+               
+                # If there's an extension cost, deduct from wallet
+                if date_extension_cost > 0:
+                    try:
+                        merchant_wallet = Wallet.objects.select_for_update().get(user=self.request.user)
+                       
+                        # Check if merchant has sufficient balance
+                        if merchant_wallet.balance < date_extension_cost:
+                            raise ValidationError(
+                                f"Insufficient wallet balance for extension. Required: {date_extension_cost} points, Available: {merchant_wallet.balance} points"
+                            )
+                       
+                        # Deduct extension cost
+                        merchant_wallet.deduct(
+                            date_extension_cost,
+                            note=f"Advertisement Extension: {old_instance.voucher.title} (+{additional_days} days)",
+                            ref_id=f"AD-EXT-{old_instance.id}"
+                        )
+                       
+                    except Wallet.DoesNotExist:
+                        raise ValidationError("Merchant wallet not found. Please contact support.")
+                    except ValidationError as e:
+                        raise e
+               
+                # Update the advertisement
+                updated_advertisement = serializer.save()
+               
+                # Return response with cost information if applicable
+                response_data = {
+                    "message": "Advertisement updated successfully",
+                    "advertisement_id": updated_advertisement.id,
+                    "voucher_title": updated_advertisement.voucher.title
+                }
+               
+                if date_extension_cost > 0:
+                    response_data.update({
+                        "extension_cost_deducted": float(date_extension_cost),
+                        "additional_days": additional_days,
+                        "remaining_balance": float(merchant_wallet.balance),
+                        "extension_transaction_note": f"Advertisement Extension: {old_instance.voucher.title} (+{additional_days} days)"
+                    })
+               
+                return Response(response_data)
+               
+        except ValidationError as e:
+            raise e
+        except Exception as e:
+            raise ValidationError(f"Failed to update advertisement: {str(e)}")
 
     @action(detail=False, methods=["get"], url_path="active")
     def active_advertisements(self, request):
-        """Get active advertisements"""
+        """Get active advertisements for the merchant"""
         try:
             current_date = timezone.now().date()
             active_ads = Advertisement.objects.filter(
+                voucher__merchant__user=request.user,
                 start_date__lte=current_date,
                 end_date__gte=current_date,
                 is_active=True
@@ -912,7 +1033,7 @@ class AdvertisementViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="by-location")
     def advertisements_by_location(self, request):
-        """Get advertisements by city and state"""
+        """Get advertisements by city and state for the merchant"""
         try:
             city = request.query_params.get('city')
             state = request.query_params.get('state')
@@ -925,6 +1046,7 @@ class AdvertisementViewSet(viewsets.ModelViewSet):
            
             current_date = timezone.now().date()
             location_ads = Advertisement.objects.filter(
+                voucher__merchant__user=request.user,
                 city__iexact=city,
                 state__iexact=state,
                 start_date__lte=current_date,
@@ -938,5 +1060,230 @@ class AdvertisementViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response(
                 {"error": "Failed to fetch advertisements by location"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=["get"], url_path="cost-info")
+    def advertisement_cost_info(self, request):
+        """Get advertisement creation cost information"""
+        try:
+            # Get advertisement cost from SiteSetting
+            try:
+                advertisement_cost_setting = SiteSetting.get_value("advertisement_cost", "10")
+                cost = Decimal(str(advertisement_cost_setting))
+            except (InvalidOperation, ValueError, TypeError):
+                cost = Decimal("10")
+           
+            # Get merchant's current wallet balance
+            try:
+                merchant_wallet = Wallet.objects.get(user=request.user)
+                current_balance = merchant_wallet.balance
+                can_create = current_balance >= cost
+            except Wallet.DoesNotExist:
+                current_balance = Decimal("0")
+                can_create = False
+           
+            return Response({
+                "advertisement_cost": float(cost),
+                "current_wallet_balance": float(current_balance),
+                "can_create_advertisement": can_create,
+                "cost_source": "SiteSetting" if SiteSetting.objects.filter(key="advertisement_cost").exists() else "Default",
+                "message": "Advertisement cost information retrieved successfully"
+            })
+           
+        except Exception as e:
+            return Response(
+                {"error": "Failed to fetch advertisement cost information"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    # @action(detail=False, methods=["get"], url_path="statistics")
+    # def advertisement_statistics(self, request):
+    #     """Get advertisement statistics for the merchant"""
+    #     try:
+    #         merchant_ads = self.get_queryset()
+    #         current_date = timezone.now().date()
+           
+    #         # Calculate statistics
+    #         total_advertisements = merchant_ads.count()
+    #         active_advertisements = merchant_ads.filter(
+    #             start_date__lte=current_date,
+    #             end_date__gte=current_date,
+    #             is_active=True
+    #         ).count()
+    #         expired_advertisements = merchant_ads.filter(
+    #             end_date__lt=current_date
+    #         ).count()
+    #         upcoming_advertisements = merchant_ads.filter(
+    #             start_date__gt=current_date
+    #         ).count()
+           
+    #         # Get total cost spent on advertisements
+    #         total_cost = total_advertisements * Decimal(SiteSetting.get_value("advertisement_cost", "10"))
+           
+    #         # Get location-wise statistics
+    #         location_stats = merchant_ads.values('city', 'state').annotate(
+    #             count=models.Count('id')
+    #         ).order_by('-count')
+           
+    #         data = {
+    #             "total_advertisements": total_advertisements,
+    #             "active_advertisements": active_advertisements,
+    #             "expired_advertisements": expired_advertisements,
+    #             "upcoming_advertisements": upcoming_advertisements,
+    #             "total_cost_spent": float(total_cost),
+    #             "cost_per_advertisement": float(SiteSetting.get_value("advertisement_cost", "10")),
+    #             "location_distribution": list(location_stats),
+    #             "message": "Advertisement statistics retrieved successfully"
+    #         }
+           
+    #         return Response(data)
+           
+    #     except Exception as e:
+    #         return Response(
+    #             {"error": "Failed to fetch advertisement statistics"},
+    #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
+    #         )
+
+    def perform_destroy(self, instance):
+        """Handle advertisement deletion - no refund for deleted advertisements"""
+        try:
+            # Check if advertisement is still active
+            current_date = timezone.now().date()
+            if instance.start_date <= current_date <= instance.end_date and instance.is_active:
+                # If advertisement is currently active, just mark as inactive
+                instance.is_active = False
+                instance.save()
+                return Response({
+                    "message": "Advertisement deactivated successfully",
+                    "note": "Advertisement was active, so it has been deactivated instead of deleted"
+                })
+            else:
+                # If advertisement is not active, delete it
+                instance.delete()
+                return Response({
+                    "message": "Advertisement deleted successfully",
+                    "note": "Advertisement was not active, so it has been permanently deleted"
+                })
+        except Exception as e:
+            raise ValidationError(f"Failed to delete advertisement: {str(e)}")
+
+class PublicAdvertisementViewSet(viewsets.ReadOnlyModelViewSet):
+    """Public API for viewing advertisements - no authentication required"""
+    queryset = Advertisement.objects.all()
+    serializer_class = AdvertisementSerializer
+    permission_classes = [IsAPIKEYAuthenticated]  # Only API key required, no user login
+    filter_backends = (DjangoFilterBackend,)
+    filterset_fields = ["city", "state"]
+    ordering = ["-create_time"]
+
+    def get_queryset(self):
+        """Get only active advertisements"""
+        current_date = timezone.now().date()
+        return Advertisement.objects.filter(
+            start_date__lte=current_date,
+            end_date__gte=current_date,
+            is_active=True
+        )
+
+    @action(detail=False, methods=["get"], url_path="active")
+    def active_advertisements(self, request):
+        """Get all active advertisements (public access)"""
+        try:
+            active_ads = self.get_queryset().order_by('-create_time')
+            serializer = self.get_serializer(active_ads, many=True)
+            return Response({
+                "active_advertisements": serializer.data,
+                "total_count": len(serializer.data),
+                "message": "Active advertisements available for public viewing"
+            })
+           
+        except Exception as e:
+            return Response(
+                {"error": "Failed to fetch active advertisements"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=["get"], url_path="by-location")
+    def advertisements_by_location(self, request):
+        """Get advertisements by city and state (public access)"""
+        try:
+            city = request.query_params.get('city')
+            state = request.query_params.get('state')
+           
+            if not city or not state:
+                return Response(
+                    {"error": "City and state parameters are required"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+           
+            location_ads = self.get_queryset().filter(
+                city__iexact=city,
+                state__iexact=state
+            ).order_by('-create_time')
+           
+            serializer = self.get_serializer(location_ads, many=True)
+            return Response({
+                "advertisements": serializer.data,
+                "total_count": len(serializer.data),
+                "location": f"{city}, {state}",
+                "message": f"Advertisements available in {city}, {state}"
+            })
+           
+        except Exception as e:
+            return Response(
+                {"error": "Failed to fetch advertisements by location"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    # @action(detail=False, methods=["get"], url_path="featured")
+    # def featured_advertisements(self, request):
+    #     """Get featured advertisements (public access)"""
+    #     try:
+    #         # Get advertisements with active vouchers that have good performance
+    #         featured_ads = self.get_queryset().filter(
+    #             voucher__purchase_count__gte=5,  # At least 5 purchases
+    #             voucher__redemption_count__gte=2  # At least 2 redemptions
+    #         ).order_by('-voucher__purchase_count', '-create_time')[:10]
+           
+    #         serializer = self.get_serializer(featured_ads, many=True)
+    #         return Response({
+    #             "featured_advertisements": serializer.data,
+    #             "total_count": len(serializer.data),
+    #             "message": "Featured advertisements based on voucher performance"
+    #         })
+           
+    #     except Exception as e:
+    #         return Response(
+    #             {"error": "Failed to fetch featured advertisements"},
+    #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
+    #         )
+
+    @action(detail=False, methods=["get"], url_path="by-category")
+    def advertisements_by_category(self, request):
+        """Get advertisements by voucher category (public access)"""
+        try:
+            category_id = request.query_params.get('category')
+            if not category_id:
+                return Response(
+                    {"error": "Category parameter is required"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+           
+            category_ads = self.get_queryset().filter(
+                voucher__category_id=category_id
+            ).order_by('-create_time')
+           
+            serializer = self.get_serializer(category_ads, many=True)
+            return Response({
+                "advertisements": serializer.data,
+                "total_count": len(serializer.data),
+                "category_id": category_id,
+                "message": f"Advertisements in category {category_id}"
+            })
+           
+        except Exception as e:
+            return Response(
+                {"error": "Failed to fetch advertisements by category"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )

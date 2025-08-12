@@ -16,8 +16,8 @@ admin.site.site_title = "Bartr Administration"
 admin.site.index_title = "Welcome to Bartr Administration"
 
 # Custom ordering for admin models
-admin.site._registry = {}
-admin.site._registry_global = {}
+# admin.site._registry = {}
+# admin.site._registry_global = {}
 
 # Register your models here.
 # admin.site.register(MultiToken)
