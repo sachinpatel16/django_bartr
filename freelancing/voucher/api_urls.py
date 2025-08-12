@@ -10,7 +10,7 @@ router.register("v1/public/vouchers", api.PublicVoucherViewSet, basename="public
 router.register("v1/purchase", api.VoucherPurchaseViewSet, basename="voucher-purchase")
 router.register("v1/my-vouchers", api.UserVoucherViewSet, basename="user-vouchers")
 router.register("v1/advertisements", api.AdvertisementViewSet, basename="advertisements")
-
+router.register("v1/public/advertisements", api.PublicAdvertisementViewSet, basename="public-advertisements")
 
 
 app_name = "voucher"
