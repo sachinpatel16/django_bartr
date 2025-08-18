@@ -7,7 +7,7 @@ from freelancing.custom_auth import api
 
 router = routers.SimpleRouter()
 router.register("v1/auth", api.UserAuthViewSet, basename="auth")
-# router.register("v1/users", api.UserViewSet, basename="users")
+router.register("v1/users", api.UserViewSet, basename="users")
 # router.register("v1/custom_permission", api.CustomPermissionViewSet, basename="custom_permission")
 
 #Merchant Profile
