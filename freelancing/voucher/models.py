@@ -135,13 +135,19 @@ class UserVoucherRedemption(BaseModel):
     redemption_location = models.CharField(max_length=255, null=True, blank=True)  # Where voucher was redeemed
     redemption_notes = models.TextField(null=True, blank=True)  # Additional notes for redemption
     wallet_transaction_id = models.CharField(max_length=100, null=True, blank=True)  # Reference to wallet transaction
+    
+    # New fields for tracking voucher counts
+    voucher_purchase_count = models.PositiveIntegerField(default=1)  # How many vouchers purchased in this transaction
+    voucher_redemption_count = models.PositiveIntegerField(default=0)  # How many vouchers redeemed from this purchase
+    max_redemption_allowed = models.PositiveIntegerField(default=1)  # Maximum redemptions allowed from this purchase
    
+     
     class Meta:
         unique_together = ['user', 'voucher']  # User can only purchase a voucher once
         ordering = ['-purchased_at']
    
     def __str__(self):
-        return f"{self.user.fullname} purchased {self.voucher.title}"
+        return f"{self.user.fullname} purchased {self.voucher.title} (Qty: {self.voucher_purchase_count}, Redeemed: {self.voucher_redemption_count})"
 
     def save(self, *args, **kwargs):
         # Generate unique purchase reference if not provided
@@ -155,38 +161,71 @@ class UserVoucherRedemption(BaseModel):
             # Use current time if purchased_at is not set yet
             base_time = self.purchased_at if self.purchased_at else timezone.now()
             self.expiry_date = base_time + timedelta(days=365)
-       
+        
+        # Set max redemption allowed based on purchase count
+        if not self.max_redemption_allowed:
+            self.max_redemption_allowed = self.voucher_purchase_count
+      
         super().save(*args, **kwargs)
 
-    def redeem(self, location=None, notes=None):
-        """Mark voucher as redeemed with atomic transaction"""
-        if not self.is_active:
-            raise ValidationError("Voucher is no longer active")
-        if self.redeemed_at:
-            raise ValidationError("Voucher has already been redeemed")
-        if self.is_expired():
-            raise ValidationError("Voucher has expired")
-       
+    def get_remaining_redemptions(self):
+        """Get remaining redemptions available"""
+        return max(0, self.max_redemption_allowed - self.voucher_redemption_count)
+
+    def can_redeem_voucher(self):
+        """Check if voucher can be redeemed (has remaining redemptions)"""
+        return (
+            self.is_active and
+            not self.is_expired() and
+            self.purchase_status == 'purchased' and
+            self.voucher_redemption_count < self.max_redemption_allowed
+        )
+
+    def redeem_voucher(self, location=None, notes=None, quantity=1):
+        """Redeem a specific quantity of vouchers from this purchase"""
+        if not self.can_redeem_voucher():
+            raise ValidationError("Voucher cannot be redeemed")
+        
+        if quantity > self.get_remaining_redemptions():
+            raise ValidationError(f"Only {self.get_remaining_redemptions()} redemptions remaining")
+        
+        if quantity <= 0:
+            raise ValidationError("Redemption quantity must be greater than 0")
+        
         try:
             with transaction.atomic():
                 # Update redemption details
-                self.redeemed_at = timezone.now()
-                self.is_active = False
-                self.purchase_status = 'redeemed'
+                self.voucher_redemption_count += quantity
+                
+                # If all vouchers are redeemed, mark as fully redeemed
+                if self.voucher_redemption_count >= self.max_redemption_allowed:
+                    self.redeemed_at = timezone.now()
+                    self.is_active = False
+                    self.purchase_status = 'redeemed'
+                
                 if location:
                     self.redemption_location = location
                 if notes:
-                    self.redemption_notes = notes
+                    self.redemption_notes = f"{notes} (Redeemed {quantity} voucher(s))"
+                else:
+                    self.redemption_notes = f"Redeemed {quantity} voucher(s)"
+                
                 self.save()
                
                 # Increment voucher redemption count atomically
-                self.voucher.redemption_count = models.F('redemption_count') + 1
+                self.voucher.redemption_count = models.F('redemption_count') + quantity
                 self.voucher.save(update_fields=['redemption_count'])
+                
+                return True
                
         except DatabaseError as e:
             raise ValidationError("Failed to redeem voucher due to database error")
         except Exception as e:
             raise ValidationError("Failed to redeem voucher")
+
+    def redeem(self, location=None, notes=None):
+        """Mark voucher as fully redeemed (backward compatibility)"""
+        return self.redeem_voucher(location, notes, self.get_remaining_redemptions())
 
     def is_expired(self):
         """Check if voucher has expired"""
@@ -195,17 +234,12 @@ class UserVoucherRedemption(BaseModel):
         return False
 
     def can_redeem(self):
-        """Check if voucher can be redeemed"""
-        return (
-            self.is_active and
-            not self.redeemed_at and
-            not self.is_expired() and
-            self.purchase_status == 'purchased'
-        )
+        """Check if voucher can be redeemed (backward compatibility)"""
+        return self.can_redeem_voucher()
 
     def cancel_purchase(self, reason=None):
         """Cancel a voucher purchase (for refunds) with atomic transaction"""
-        if self.redeemed_at:
+        if self.redeemed_at or self.voucher_redemption_count > 0:
             raise ValidationError("Cannot cancel redeemed voucher")
        
         try:
@@ -223,7 +257,7 @@ class UserVoucherRedemption(BaseModel):
 
     def refund_purchase(self, reason=None):
         """Refund a voucher purchase with atomic transaction"""
-        if self.redeemed_at:
+        if self.redeemed_at or self.voucher_redemption_count > 0:
             raise ValidationError("Cannot refund redeemed voucher")
        
         try:
@@ -256,6 +290,24 @@ class UserVoucherRedemption(BaseModel):
             raise ValidationError("Failed to refund voucher")
 
     @classmethod
+    def get_user_voucher_stats(cls, user):
+        """Get voucher statistics for a specific user"""
+        user_vouchers = cls.objects.filter(user=user)
+        
+        total_purchased = sum(v.voucher_purchase_count for v in user_vouchers)
+        total_redeemed = sum(v.voucher_redemption_count for v in user_vouchers)
+        active_vouchers = user_vouchers.filter(is_active=True, purchase_status='purchased').count()
+        expired_vouchers = user_vouchers.filter(purchase_status='expired').count()
+        
+        return {
+            'total_purchased': total_purchased,
+            'total_redeemed': total_redeemed,
+            'active_vouchers': active_vouchers,
+            'expired_vouchers': expired_vouchers,
+            'redemption_rate': round((total_redeemed / total_purchased * 100), 2) if total_purchased > 0 else 0
+        }
+
+    @classmethod
     def bulk_expire_vouchers(cls):
         """Bulk expire vouchers that have passed their expiry date"""
         try:
@@ -263,7 +315,7 @@ class UserVoucherRedemption(BaseModel):
                 expired_vouchers = cls.objects.filter(
                     purchase_status='purchased',
                     expiry_date__lt=timezone.now(),
-                    redeemed_at__isnull=True
+                    voucher_redemption_count__lt=models.F('max_redemption_allowed')
                 )
                
                 count = expired_vouchers.update(
@@ -290,4 +342,3 @@ class UserVoucherRedemption(BaseModel):
         """Check if voucher is about to expire"""
         remaining_days = self.get_remaining_days()
         return remaining_days is not None and remaining_days <= days_threshold
-
