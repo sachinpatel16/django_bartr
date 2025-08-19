@@ -311,7 +311,8 @@ class PurchaseHistorySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'purchase_reference', 'purchase_status', 'purchased_at',
             'redeemed_at', 'expiry_date', 'purchase_cost', 'redemption_location',
-            'redemption_notes', 'voucher_details', 'merchant_details'
+            'redemption_notes', 'voucher_purchase_count', 'voucher_redemption_count', 
+            'max_redemption_allowed', 'voucher_details', 'merchant_details'
         ]
    
     def get_voucher_details(self, obj):
@@ -460,6 +461,46 @@ class AdvertisementSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("End date must be after start date")
        
         return data
+
+
+class MerchantVoucherScanSerializer(serializers.Serializer):
+    """Serializer for merchant voucher scanning"""
+    qr_data = serializers.CharField(
+        max_length=100,
+        help_text="QR code data (can be redemption ID, purchase reference, or voucher UUID)"
+    )
+
+class MerchantVoucherRedeemSerializer(serializers.Serializer):
+    """Serializer for merchant voucher redemption"""
+    redemption_id = serializers.IntegerField(
+        help_text="ID of the voucher redemption record to redeem"
+    )
+    location = serializers.CharField(
+        max_length=255,
+        required=False,
+        help_text="Location where voucher is being redeemed"
+    )
+    notes = serializers.CharField(
+        max_length=500,
+        required=False,
+        help_text="Additional notes about the redemption"
+    )
+    quantity = serializers.IntegerField(
+        min_value=1,
+        default=1,
+        help_text="Number of vouchers to redeem from this purchase"
+    )
+
+    def validate_redemption_id(self, value):
+        """Validate that redemption_id exists and is active"""
+        try:
+            redemption = UserVoucherRedemption.objects.get(
+                id=value,
+                is_active=True
+            )
+            return value
+        except UserVoucherRedemption.DoesNotExist:
+            raise serializers.ValidationError("Voucher redemption record not found or inactive")
 
 
 

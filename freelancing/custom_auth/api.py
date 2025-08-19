@@ -300,154 +300,154 @@ class UserViewSet(viewsets.ModelViewSet):
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    @action(
-        methods=["post"],
-        detail=False,
-        permission_classes=[permissions.AllowAny, IsAPIKEYAuthenticated],
-        url_path="reset-password-email",
-        url_name="reset_password_email",
-    )
-    def reset_password_email(self, request, *args, **kwargs):
-        """
-        :param request:
-        :param args:
-        :param kwargs:
-        :return:
-        """
-        user_email = request.data.get("email")
-        user_type = request.data.get("user_type")
-        if not user_email:
-            raise ValidationError(_("Email field is required."))
-        if not user_type:
-            raise ValidationError(_("User type field is required."))
+    # @action(
+    #     methods=["post"],
+    #     detail=False,
+    #     permission_classes=[permissions.AllowAny, IsAPIKEYAuthenticated],
+    #     url_path="reset-password-email",
+    #     url_name="reset_password_email",
+    # )
+    # def reset_password_email(self, request, *args, **kwargs):
+    #     """
+    #     :param request:
+    #     :param args:
+    #     :param kwargs:
+    #     :return:
+    #     """
+    #     user_email = request.data.get("email")
+    #     user_type = request.data.get("user_type")
+    #     if not user_email:
+    #         raise ValidationError(_("Email field is required."))
+    #     if not user_type:
+    #         raise ValidationError(_("User type field is required."))
 
-        user_model = User
-        user = user_model.objects.filter(email__iexact=user_email, is_active=True, is_delete=False).first()
+    #     user_model = User
+    #     user = user_model.objects.filter(email__iexact=user_email, is_active=True, is_delete=False).first()
 
-        if not user:
-            raise NotFound(_("User doesn't exists."))
+    #     if not user:
+    #         raise NotFound(_("User doesn't exists."))
 
-        if user.user_type != user_type:
-            if user.user_type == "sub_admin" and user_type == "admin":
-                pass  # Allow sub_admin to access admin resources
-            else:
-                if user_type == "student":
-                    raise ValidationError(_("Please enter valid email id"))
-                raise PermissionDenied("You do not have permission to access this resource.")
+    #     if user.user_type != user_type:
+    #         if user.user_type == "sub_admin" and user_type == "admin":
+    #             pass  # Allow sub_admin to access admin resources
+    #         else:
+    #             if user_type == "student":
+    #                 raise ValidationError(_("Please enter valid email id"))
+    #             raise PermissionDenied("You do not have permission to access this resource.")
 
-        if user.user_type == "student" and user.login_type != "S":
-            raise ValidationError(_("Please enter valid email id"))
+    #     if user.user_type == "student" and user.login_type != "S":
+    #         raise ValidationError(_("Please enter valid email id"))
 
-        otp = random.randint(1111, 9999)
+    #     otp = random.randint(1111, 9999)
 
-        LoginOtp.objects.create(user=user, otp=otp)
-        # forget_password_otp(user, otp)
-        site = get_current_site(request)
+    #     LoginOtp.objects.create(user=user, otp=otp)
+    #     # forget_password_otp(user, otp)
+    #     site = get_current_site(request)
 
-        send_templated_mail(
-            template_name="user_password_reset",
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            context={
-                'domain': site.domain,
-                'user': user,
-                'protocol': 'http',
-                'otp': otp,
-            }
-        )
+    #     send_templated_mail(
+    #         template_name="user_password_reset",
+    #         from_email=settings.DEFAULT_FROM_EMAIL,
+    #         recipient_list=[user.email],
+    #         context={
+    #             'domain': site.domain,
+    #             'user': user,
+    #             'protocol': 'http',
+    #             'otp': otp,
+    #         }
+    #     )
 
-        # return Response(_("Email has been sent."))
-        return Response({"message": "OTP sent successfully."})
+    #     # return Response(_("Email has been sent."))
+    #     return Response({"message": "OTP sent successfully."})
 
-    @action(
-        methods=["post"],
-        permission_classes=[permissions.AllowAny, IsAPIKEYAuthenticated],
-        url_name="check_otp",
-        url_path="check-otp",
-        detail=False,
-    )
-    def check_otp(self, *args, **kwargs):
-        serializer = CheckOtp(data=self.request.data)
-        serializer.is_valid(raise_exception=True)
+    # @action(
+    #     methods=["post"],
+    #     permission_classes=[permissions.AllowAny, IsAPIKEYAuthenticated],
+    #     url_name="check_otp",
+    #     url_path="check-otp",
+    #     detail=False,
+    # )
+    # def check_otp(self, *args, **kwargs):
+    #     serializer = CheckOtp(data=self.request.data)
+    #     serializer.is_valid(raise_exception=True)
 
-        user_model = User
-        user = user_model.objects.filter(
-            email=serializer.validated_data.get("email")
-        ).first()
-        if not user:
-            raise NotFound(_("User doesn't exists."))
-        otp = serializer.data["otp"]
-        # get_otp = Otp.objects.filter(user=user, expiration_time__gte=timezone.now()).last()
-        get_otp = (
-            LoginOtp.objects.filter(user=user, expiration_time__gte=timezone.now()).first()
-            if int(otp) == 1234
-            else LoginOtp.objects.filter(
-                user=user, otp=otp, expiration_time__gt=timezone.now()
-            ).first()
-        )
-        if not get_otp:
-            raise ValidationError(_("Otp doesn't match"))
+    #     user_model = User
+    #     user = user_model.objects.filter(
+    #         email=serializer.validated_data.get("email")
+    #     ).first()
+    #     if not user:
+    #         raise NotFound(_("User doesn't exists."))
+    #     otp = serializer.data["otp"]
+    #     # get_otp = Otp.objects.filter(user=user, expiration_time__gte=timezone.now()).last()
+    #     get_otp = (
+    #         LoginOtp.objects.filter(user=user, expiration_time__gte=timezone.now()).first()
+    #         if int(otp) == 1234
+    #         else LoginOtp.objects.filter(
+    #             user=user, otp=otp, expiration_time__gt=timezone.now()
+    #         ).first()
+    #     )
+    #     if not get_otp:
+    #         raise ValidationError(_("Otp doesn't match"))
 
-        # if int(get_otp.otp) == int(serializer.data['otp']):
-        #     return Response(_("Otp verified!!"), status=HTTP_200_OK)
-        return Response(_("Otp verified!!"), status=HTTP_200_OK)
+    #     # if int(get_otp.otp) == int(serializer.data['otp']):
+    #     #     return Response(_("Otp verified!!"), status=HTTP_200_OK)
+    #     return Response(_("Otp verified!!"), status=HTTP_200_OK)
 
-    @action(
-        methods=["post"],
-        permission_classes=[permissions.AllowAny, IsAPIKEYAuthenticated],
-        url_name="reset_change_password",
-        url_path="reset_change_password",
-        detail=False,
-    )
-    def reset_change_password(self, request, *args, **kwargs):
-        email = request.data.get("email")
+    # @action(
+    #     methods=["post"],
+    #     permission_classes=[permissions.AllowAny, IsAPIKEYAuthenticated],
+    #     url_name="reset_change_password",
+    #     url_path="reset_change_password",
+    #     detail=False,
+    # )
+    # def reset_change_password(self, request, *args, **kwargs):
+    #     email = request.data.get("email")
 
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+    #     serializer = self.get_serializer(data=request.data)
+    #     serializer.is_valid(raise_exception=True)
 
-        password_reset_obj = get_object_or_404(
-            ApplicationUser, email=email, is_delete=False
-        )
+    #     password_reset_obj = get_object_or_404(
+    #         ApplicationUser, email=email, is_delete=False
+    #     )
 
-        user = ApplicationUser.objects.get(pk=password_reset_obj.id)
-        user.set_password(serializer.data["password"])
-        user.save()
+    #     user = ApplicationUser.objects.get(pk=password_reset_obj.id)
+    #     user.set_password(serializer.data["password"])
+    #     user.save()
 
-        # send mail
-        site = get_current_site(request)
+    #     # send mail
+    #     site = get_current_site(request)
 
-        send_templated_mail(
-            template_name="user_password_reset",
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            context={
-                'domain': site.domain,
-                'user': user,
-                'protocol': 'http',
-                'password': serializer.data["password"],
-            }
-        )
-        # if user.user_type == "student":
-        #     sing_up_successful(user, serializer.data["password"])
+    #     send_templated_mail(
+    #         template_name="user_password_reset",
+    #         from_email=settings.DEFAULT_FROM_EMAIL,
+    #         recipient_list=[user.email],
+    #         context={
+    #             'domain': site.domain,
+    #             'user': user,
+    #             'protocol': 'http',
+    #             'password': serializer.data["password"],
+    #         }
+    #     )
+    #     # if user.user_type == "student":
+    #     #     sing_up_successful(user, serializer.data["password"])
 
-        return Response(_("Password reset successfully!"))
+    #     return Response(_("Password reset successfully!"))
 
-    @action(
-        methods=["post"],
-        detail=False,
-        url_path="change_password",
-        url_name="change_password",
-    )
-    def change_password(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+    # @action(
+    #     methods=["post"],
+    #     detail=False,
+    #     url_path="change_password",
+    #     url_name="change_password",
+    # )
+    # def change_password(self, request, *args, **kwargs):
+    #     serializer = self.get_serializer(data=request.data)
 
-        serializer.is_valid(raise_exception=True)
+    #     serializer.is_valid(raise_exception=True)
 
-        user = request.user
-        user.set_password(serializer.data["new_password"])
-        user.save()
+    #     user = request.user
+    #     user.set_password(serializer.data["new_password"])
+    #     user.save()
 
-        return Response(_("Password update successfully!"))
+    #     return Response(_("Password update successfully!"))
 
 
 
