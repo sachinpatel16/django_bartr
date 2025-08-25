@@ -1,4 +1,5 @@
 import re
+from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -416,7 +417,7 @@ class MerchantListingSerializer(serializers.ModelSerializer):
 
 class RazorpayOrderSerializer(serializers.Serializer):
     """Serializer for creating Razorpay order"""
-    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=1.0)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('1.0'))
     currency = serializers.CharField(default='INR', max_length=3)
     description = serializers.CharField(max_length=255, required=False, allow_blank=True)
     receipt = serializers.CharField(max_length=255, required=False, allow_blank=True)

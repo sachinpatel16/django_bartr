@@ -31,6 +31,7 @@ schema_view = get_schema_view(
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('health/', csrf_exempt(lambda request: JsonResponse({'status': 'healthy', 'message': 'Django application is running'})), name='health-check'),
+    path('cors-test/', csrf_exempt(lambda request: JsonResponse({'cors': 'working', 'origin': request.META.get('HTTP_ORIGIN', 'unknown')})), name='cors-test'),
     path('swagger/', login_required(schema_view.with_ui('swagger', cache_timeout=0)), name='schema-swagger-ui'),
     path('accounts/login/', lambda request: redirect(f'/admin/login/?next=/swagger/')),  # Redirect to admin login with next parameter
     path('accounts/', include('django.contrib.auth.urls')),

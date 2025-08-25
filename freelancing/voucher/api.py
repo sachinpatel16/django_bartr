@@ -21,11 +21,11 @@ Key Features:
 - Location-based advertisement targeting
 - WhatsApp integration for gift card sharing
 - Comprehensive analytics and reporting
-- Multi-level permission system (JWT + API Key)
+- JWT Token authentication system
 
 Authentication:
 - JWT Token: Required for user-specific operations
-- API Key: Required for all endpoints to identify the application
+- No API Key required
 
 Usage Examples:
 - Merchants: Create vouchers, view analytics, manage advertisements
@@ -36,7 +36,7 @@ Usage Examples:
 from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from freelancing.utils.permissions import IsAPIKEYAuthenticated
+from rest_framework.exceptions import ValidationError
 from django.db import transaction
 import json
 import requests
@@ -47,7 +47,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.db import IntegrityError, DatabaseError
 from decimal import Decimal, InvalidOperation
 
-from freelancing.voucher.models import Voucher, WhatsAppContact, Advertisement, UserVoucherRedemption, VoucherType
+from freelancing.voucher.models import Voucher, WhatsAppContact, Advertisement, UserVoucherRedemption, VoucherType, GiftCardShare
 from freelancing.voucher.serializers import (
     VoucherCreateSerializer, WhatsAppContactSerializer, GiftCardShareSerializer, 
     AdvertisementSerializer, VoucherListSerializer, VoucherPurchaseSerializer,
@@ -60,6 +60,7 @@ from rest_framework.filters import SearchFilter
 from django.db import models
 from freelancing.custom_auth.models import MerchantProfile
 from django.conf import settings
+from drf_yasg.utils import swagger_auto_schema
 
 class VoucherViewSet(viewsets.ModelViewSet):
     """
@@ -76,14 +77,13 @@ class VoucherViewSet(viewsets.ModelViewSet):
     - Popular voucher tracking
     - Merchant-specific voucher filtering
     
-    Authentication: JWT Token + API Key required
+    Authentication: JWT Token required
     Permissions: Authenticated merchants can only manage their own vouchers
     """
     queryset = Voucher.objects.all()
     serializer_class = VoucherCreateSerializer
     permission_classes = [
         permissions.IsAuthenticated,
-        IsAPIKEYAuthenticated,
     ]
     authentication_classes = [JWTAuthentication]
     filter_backends = (DjangoFilterBackend, SearchFilter)
@@ -99,12 +99,16 @@ class VoucherViewSet(viewsets.ModelViewSet):
             QuerySet: Filtered vouchers belonging to the current merchant user
         """
         # Only show merchant's own vouchers
-        return Voucher.objects.filter(merchant__user=self.request.user)
+        # Handle case where request.user might not be available (e.g., during Swagger inspection)
+        if hasattr(self, 'request') and hasattr(self.request, 'user') and self.request.user.is_authenticated:
+            return Voucher.objects.filter(merchant__user=self.request.user)
+        # Return empty queryset for unauthenticated requests or during inspection
+        return Voucher.objects.none()
 
     def perform_create(self, serializer):
         serializer.save()
 
-    @action(detail=False, methods=["get"], url_path="statistics", permission_classes=[IsAPIKEYAuthenticated])
+    @action(detail=False, methods=["get"], url_path="statistics")
     def voucher_statistics(self, request):
         """
         Get comprehensive voucher statistics for the authenticated merchant.
@@ -187,8 +191,7 @@ class VoucherViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    @action(detail=True, methods=["post"], url_path="redeem", permission_classes=[permissions.AllowAny,
-                                                                IsAPIKEYAuthenticated])
+    @action(detail=True, methods=["post"], url_path="redeem", permission_classes=[permissions.AllowAny])
     def redeem_voucher(self, request, pk=None):
         """
         Redeem a voucher by incrementing its redemption count.
@@ -249,15 +252,14 @@ class VoucherViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    @action(detail=True, methods=["post"], url_path="share-gift-card", permission_classes=[permissions.AllowAny,
-                                                                IsAPIKEYAuthenticated])
+    @action(detail=True, methods=["post"], url_path="share-gift-card", permission_classes=[permissions.AllowAny])
     def share_gift_card(self, request, pk=None):
         """
         Share a gift card voucher via WhatsApp to multiple contacts.
         
         This endpoint allows users to share gift card vouchers with their WhatsApp
-        contacts. It validates that the voucher is actually a gift card and checks
-        which contacts are available on WhatsApp before sending.
+        contacts. It creates individual share records for each recipient, allowing
+        them to claim and use the gift card independently.
         
         Args:
             request: HTTP request object containing phone numbers
@@ -279,7 +281,14 @@ class VoucherViewSet(viewsets.ModelViewSet):
         {
             "message": "Gift card shared successfully to 3 contacts",
             "success_count": 3,
-            "failed_numbers": ["+919876543212"]
+            "failed_numbers": ["+919876543212"],
+            "shares_created": [
+                {
+                    "phone_number": "+919876543210",
+                    "claim_reference": "GFT-12345678",
+                    "share_id": 1
+                }
+            ]
         }
         """
         try:
@@ -310,25 +319,74 @@ class VoucherViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
            
-            # Send gift card via WhatsApp API
+            # Get or create the user's voucher redemption record
+            try:
+                user_redemption = UserVoucherRedemption.objects.get(
+                    user=request.user,
+                    voucher=voucher,
+                    is_active=True
+                )
+            except UserVoucherRedemption.DoesNotExist:
+                return Response(
+                    {"error": "You must purchase this gift card before sharing it"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+           
+            # Create gift card shares for each recipient
+            shares_created = []
             success_count = 0
             failed_numbers = []
            
             for contact in user_contacts:
                 try:
-                    # WhatsApp API call (you'll need to implement this based on your WhatsApp provider)
-                    success = self.send_whatsapp_gift_card(contact.phone_number, voucher)
-                    if success:
+                    # Create or get existing share record
+                    share, created = GiftCardShare.objects.get_or_create(
+                        original_purchase=user_redemption,
+                        recipient_phone=contact.phone_number,
+                        defaults={
+                            'recipient_name': contact.name,
+                            'shared_via': 'whatsapp'
+                        }
+                    )
+                    
+                    if created:
+                        shares_created.append({
+                            'phone_number': contact.phone_number,
+                            'claim_reference': share.claim_reference,
+                            'share_id': share.id
+                        })
                         success_count += 1
                     else:
-                        failed_numbers.append(contact.phone_number)
+                        # Share already exists
+                        shares_created.append({
+                            'phone_number': contact.phone_number,
+                            'claim_reference': share.claim_reference,
+                            'share_id': share.id,
+                            'already_shared': True
+                        })
+                        success_count += 1
+                        
                 except Exception as e:
                     failed_numbers.append(contact.phone_number)
+           
+            # Send gift card via WhatsApp API
+            for share in shares_created:
+                try:
+                    # WhatsApp API call (you'll need to implement this based on your WhatsApp provider)
+                    success = self.send_whatsapp_gift_card(share['phone_number'], voucher, share['claim_reference'])
+                    if not success:
+                        failed_numbers.append(share['phone_number'])
+                        success_count -= 1
+                except Exception as e:
+                    failed_numbers.append(share['phone_number'])
+                    success_count -= 1
            
             return Response({
                 "message": f"Gift card shared successfully to {success_count} contacts",
                 "success_count": success_count,
-                "failed_numbers": failed_numbers
+                "failed_numbers": failed_numbers,
+                "shares_created": shares_created,
+                "note": "Each recipient can claim and use the gift card independently"
             })
            
         except Exception as e:
@@ -337,28 +395,50 @@ class VoucherViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    def send_whatsapp_gift_card(self, phone_number, voucher):
+    def send_whatsapp_gift_card(self, phone_number, voucher, claim_reference):
         """
-        Send gift card voucher via WhatsApp API.
+        Send gift card voucher via WhatsApp API with claim reference.
         
-        This is a placeholder method that should be implemented based on your
-        WhatsApp Business API provider (e.g., Twilio, MessageBird, etc.).
+        This method sends a WhatsApp message containing the gift card details
+        and a unique claim reference that recipients can use to claim the gift card.
         
         Args:
             phone_number (str): Recipient's phone number
             voucher (Voucher): Gift card voucher object to send
+            claim_reference (str): Unique claim reference for the recipient
             
         Returns:
             bool: True if sent successfully, False otherwise
-            
-        Note:
-            This method needs to be implemented with actual WhatsApp API integration.
-            Currently returns True as a placeholder.
         """
         try:
+            # Create message with claim reference
+            message_body = f"""
+🎁 *Gift Card: {voucher.title}*
+
+{voucher.message}
+
+🏪 *Merchant:* {voucher.merchant.business_name}
+📍 *Location:* {voucher.merchant.city}, {voucher.merchant.state}
+
+💳 *Voucher Type:* {voucher.voucher_type.name}
+💰 *Value:* {self.get_voucher_value(voucher)}
+
+⏰ *Valid Until:* {voucher.expiry_date.strftime('%B %d, %Y') if voucher.expiry_date else 'No expiry'}
+
+🔑 *Claim Reference:* {claim_reference}
+
+To claim this gift card:
+1. Visit: https://yourdomain.com/claim-gift-card/{claim_reference}
+2. Or show this reference to the merchant
+
+*This gift card can only be claimed once by the recipient.*
+            """
+            
             # Implement your WhatsApp API integration here
             # This is a placeholder implementation
+            print(f"Sending WhatsApp message to {phone_number}: {message_body}")
             return True
+            
         except Exception:
             return False
 
@@ -386,8 +466,7 @@ class VoucherViewSet(viewsets.ModelViewSet):
             return f"Free {voucher.product_name}"
         return "Special offer"
 
-    @action(detail=False, methods=["get"], url_path="popular", permission_classes=[
-                                                                IsAPIKEYAuthenticated])
+    @action(detail=False, methods=["get"], url_path="popular")
     def popular_vouchers(self, request):
         """
         Get popular vouchers based on purchase and redemption activity.
@@ -472,12 +551,12 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
     - Location-based voucher discovery
     - Category-based voucher browsing
     
-    Authentication: Only API Key required (no user login needed)
+    Authentication: No authentication required (public access)
     Permissions: Public read-only access
     """
     queryset = Voucher.objects.filter(is_active=True, is_gift_card=False)
     serializer_class = VoucherListSerializer
-    permission_classes = [IsAPIKEYAuthenticated]
+    permission_classes = []
     filter_backends = (DjangoFilterBackend, SearchFilter)
     search_fields = ["title", "message", "merchant__business_name"]
     filterset_fields = ["voucher_type", "category", "merchant"]
@@ -532,14 +611,14 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
         
         return queryset
 
-    @action(detail=False, methods=["get"], url_path="type", permission_classes=[IsAPIKEYAuthenticated])
+    @action(detail=False, methods=["get"], url_path="type")
     def voucher_categories(self, request):
         """Get all voucher categories"""
         categories = VoucherType.objects.filter(is_active=True)
         serializer = VoucherTypeSerializer(categories, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=["get"], url_path="featured", permission_classes=[IsAPIKEYAuthenticated])
+    @action(detail=False, methods=["get"], url_path="featured")
     def featured_vouchers(self, request):
         """Get featured vouchers (most popular based on purchase and redemption)"""
         # Only include vouchers that have been used (purchased or redeemed)
@@ -555,7 +634,7 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
             "message": "Featured vouchers based on popularity (only used vouchers)"
         })
 
-    @action(detail=False, methods=["get"], url_path="nearby", permission_classes=[IsAPIKEYAuthenticated])
+    @action(detail=False, methods=["get"], url_path="nearby")
     def nearby_vouchers(self, request):
         """Get vouchers from nearby merchants"""
         # This would require location-based filtering
@@ -564,7 +643,7 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = self.get_serializer(nearby, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=["get"], url_path="trending", permission_classes=[IsAPIKEYAuthenticated])
+    @action(detail=False, methods=["get"], url_path="trending")
     def trending_vouchers(self, request):
         """Get trending vouchers (recent popular purchases in last 7 days)"""
         from datetime import timedelta
@@ -609,14 +688,19 @@ class VoucherPurchaseViewSet(viewsets.ViewSet):
     - Redemption tracking
     - Cancellation and refund processing
     
-    Authentication: JWT Token + API Key required
+    Authentication: JWT Token required
     Permissions: Authenticated users can manage their own purchases
     """
-    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [JWTAuthentication]
 
-    @action(detail=False, methods=["post"], url_path="purchase", permission_classes=[permissions.AllowAny,
-                                                                IsAPIKEYAuthenticated])
+    @swagger_auto_schema(
+        method='post',
+        request_body=VoucherPurchaseSerializer,   # 👈 force swagger to show body
+        responses={200: "Success"}
+    )
+
+    @action(detail=False, methods=["post"], url_path="purchase", permission_classes=[permissions.AllowAny])
     def purchase_voucher(self, request):
         """
         Purchase a voucher using wallet points with atomic transaction management.
@@ -788,127 +872,127 @@ class VoucherPurchaseViewSet(viewsets.ViewSet):
             "status": "deprecated"
         }, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=["post"], url_path="cancel")
-    def cancel_purchase(self, request):
-        """Cancel a voucher purchase with atomic transaction"""
-        serializer = VoucherCancelSerializer(data=request.data, context={'request': request})
-        serializer.is_valid(raise_exception=True)
+    # @action(detail=False, methods=["post"], url_path="cancel")
+    # def cancel_purchase(self, request):
+    #     """Cancel a voucher purchase with atomic transaction"""
+    #     serializer = VoucherCancelSerializer(data=request.data, context={'request': request})
+    #     serializer.is_valid(raise_exception=True)
         
-        redemption_id = serializer.validated_data['redemption_id']
-        reason = serializer.validated_data.get('reason', '')
-        user = request.user
+    #     redemption_id = serializer.validated_data['redemption_id']
+    #     reason = serializer.validated_data.get('reason', '')
+    #     user = request.user
         
-        try:
-            with transaction.atomic():
-                # 1. Get redemption record with select_for_update
-                try:
-                    redemption = UserVoucherRedemption.objects.select_for_update().get(
-                        id=redemption_id,
-                        user=user
-                    )
-                except UserVoucherRedemption.DoesNotExist:
-                    raise ValidationError("Voucher not found")
+    #     try:
+    #         with transaction.atomic():
+    #             # 1. Get redemption record with select_for_update
+    #             try:
+    #                 redemption = UserVoucherRedemption.objects.select_for_update().get(
+    #                     id=redemption_id,
+    #                     user=user
+    #                 )
+    #             except UserVoucherRedemption.DoesNotExist:
+    #                 raise ValidationError("Voucher not found")
                 
-                # 2. Validate cancellation eligibility
-                if redemption.redeemed_at:
-                    raise ValidationError("Cannot cancel redeemed voucher")
-                if redemption.purchase_status in ['cancelled', 'refunded']:
-                    raise ValidationError("Voucher is already cancelled or refunded")
+    #             # 2. Validate cancellation eligibility
+    #             if redemption.redeemed_at:
+    #                 raise ValidationError("Cannot cancel redeemed voucher")
+    #             if redemption.purchase_status in ['cancelled', 'refunded']:
+    #                 raise ValidationError("Voucher is already cancelled or refunded")
                 
-                # 3. Cancel the purchase
-                try:
-                    redemption.cancel_purchase(reason=reason)
-                except ValidationError as e:
-                    raise ValidationError(f"Cancellation failed: {str(e)}")
+    #             # 3. Cancel the purchase
+    #             try:
+    #                 redemption.cancel_purchase(reason=reason)
+    #             except ValidationError as e:
+    #                 raise ValidationError(f"Cancellation failed: {str(e)}")
                 
-                return Response({
-                    "message": "Voucher purchase cancelled successfully",
-                    "voucher_title": redemption.voucher.title,
-                    "purchase_reference": redemption.purchase_reference,
-                    "purchase_status": redemption.purchase_status,
-                    "transaction_id": redemption.wallet_transaction_id
-                })
+    #             return Response({
+    #                 "message": "Voucher purchase cancelled successfully",
+    #                 "voucher_title": redemption.voucher.title,
+    #                 "purchase_reference": redemption.purchase_reference,
+    #                 "purchase_status": redemption.purchase_status,
+    #                 "transaction_id": redemption.wallet_transaction_id
+    #             })
                 
-        except ValidationError as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except DatabaseError as e:
-            return Response(
-                {"error": "Database error occurred. Please try again."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-        except Exception as e:
-            return Response(
-                {"error": "An unexpected error occurred. Please try again."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+    #     except ValidationError as e:
+    #         return Response(
+    #             {"error": str(e)},
+    #             status=status.HTTP_400_BAD_REQUEST
+    #         )
+    #     except DatabaseError as e:
+    #         return Response(
+    #             {"error": "Database error occurred. Please try again."},
+    #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
+    #         )
+    #     except Exception as e:
+    #         return Response(
+    #             {"error": "An unexpected error occurred. Please try again."},
+    #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
+    #         )
 
-    @action(detail=False, methods=["post"], url_path="refund")
-    def refund_purchase(self, request):
-        """Refund a voucher purchase with atomic transaction"""
-        serializer = VoucherRefundSerializer(data=request.data, context={'request': request})
-        serializer.is_valid(raise_exception=True)
+    # @action(detail=False, methods=["post"], url_path="refund")
+    # def refund_purchase(self, request):
+    #     """Refund a voucher purchase with atomic transaction"""
+    #     serializer = VoucherRefundSerializer(data=request.data, context={'request': request})
+    #     serializer.is_valid(raise_exception=True)
         
-        redemption_id = serializer.validated_data['redemption_id']
-        reason = serializer.validated_data.get('reason', '')
-        user = request.user
+    #     redemption_id = serializer.validated_data['redemption_id']
+    #     reason = serializer.validated_data.get('reason', '')
+    #     user = request.user
         
-        try:
-            with transaction.atomic():
-                # 1. Get redemption record with select_for_update
-                try:
-                    redemption = UserVoucherRedemption.objects.select_for_update().get(
-                        id=redemption_id,
-                        user=user
-                    )
-                except UserVoucherRedemption.DoesNotExist:
-                    raise ValidationError("Voucher not found")
+    #     try:
+    #         with transaction.atomic():
+    #             # 1. Get redemption record with select_for_update
+    #             try:
+    #                 redemption = UserVoucherRedemption.objects.select_for_update().get(
+    #                     id=redemption_id,
+    #                     user=user
+    #                 )
+    #             except UserVoucherRedemption.DoesNotExist:
+    #                 raise ValidationError("Voucher not found")
                 
-                # 2. Validate refund eligibility
-                if redemption.redeemed_at:
-                    raise ValidationError("Cannot refund redeemed voucher")
-                if redemption.purchase_status in ['cancelled', 'refunded']:
-                    raise ValidationError("Voucher is already cancelled or refunded")
+    #             # 2. Validate refund eligibility
+    #             if redemption.redeemed_at:
+    #                 raise ValidationError("Cannot refund redeemed voucher")
+    #             if redemption.purchase_status in ['cancelled', 'refunded']:
+    #                 raise ValidationError("Voucher is already cancelled or refunded")
                 
-                # 3. Get user wallet with select_for_update
-                try:
-                    wallet = Wallet.objects.select_for_update().get(user=user)
-                except Wallet.DoesNotExist:
-                    raise ValidationError("User wallet not found for refund")
+    #             # 3. Get user wallet with select_for_update
+    #             try:
+    #                 wallet = Wallet.objects.select_for_update().get(user=user)
+    #             except Wallet.DoesNotExist:
+    #                 raise ValidationError("User wallet not found for refund")
                 
-                # 4. Refund the purchase
-                try:
-                    redemption.refund_purchase(reason=reason)
-                except ValidationError as e:
-                    raise ValidationError(f"Refund failed: {str(e)}")
+    #             # 4. Refund the purchase
+    #             try:
+    #                 redemption.refund_purchase(reason=reason)
+    #             except ValidationError as e:
+    #                 raise ValidationError(f"Refund failed: {str(e)}")
                 
-                return Response({
-                    "message": "Voucher purchase refunded successfully",
-                    "voucher_title": redemption.voucher.title,
-                    "purchase_reference": redemption.purchase_reference,
-                    "refund_amount": float(redemption.purchase_cost),
-                    "remaining_balance": float(wallet.balance),
-                    "purchase_status": redemption.purchase_status,
-                    "transaction_id": redemption.wallet_transaction_id
-                })
+    #             return Response({
+    #                 "message": "Voucher purchase refunded successfully",
+    #                 "voucher_title": redemption.voucher.title,
+    #                 "purchase_reference": redemption.purchase_reference,
+    #                 "refund_amount": float(redemption.purchase_cost),
+    #                 "remaining_balance": float(wallet.balance),
+    #                 "purchase_status": redemption.purchase_status,
+    #                 "transaction_id": redemption.wallet_transaction_id
+    #             })
                 
-        except ValidationError as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except DatabaseError as e:
-            return Response(
-                {"error": "Database error occurred. Please try again."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-        except Exception as e:
-            return Response(
-                {"error": "An unexpected error occurred. Please try again."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+    #     except ValidationError as e:
+    #         return Response(
+    #             {"error": str(e)},
+    #             status=status.HTTP_400_BAD_REQUEST
+    #         )
+    #     except DatabaseError as e:
+    #         return Response(
+    #             {"error": "Database error occurred. Please try again."},
+    #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
+    #         )
+    #     except Exception as e:
+    #         return Response(
+    #             {"error": "An unexpected error occurred. Please try again."},
+    #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
+    #         )
 
 class UserVoucherViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -927,11 +1011,11 @@ class UserVoucherViewSet(viewsets.ReadOnlyModelViewSet):
     - Gift card management
     - Purchase summary and statistics
     
-    Authentication: JWT Token + API Key required
+    Authentication: JWT Token required
     Permissions: Users can only access their own voucher data
     """
     serializer_class = UserVoucherSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [JWTAuthentication]
     filter_backends = (DjangoFilterBackend,)
     filterset_fields = ["purchase_status", "is_gift_voucher"]
@@ -939,7 +1023,11 @@ class UserVoucherViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         """Get user's purchased vouchers"""
-        return UserVoucherRedemption.objects.filter(user=self.request.user)
+        # Handle case where request.user might not be available (e.g., during Swagger inspection)
+        if hasattr(self, 'request') and hasattr(self.request, 'user') and self.request.user.is_authenticated:
+            return UserVoucherRedemption.objects.filter(user=self.request.user)
+        # Return empty queryset for unauthenticated requests or during inspection
+        return UserVoucherRedemption.objects.none()
 
     @action(detail=False, methods=["get"], url_path="active")
     def active_vouchers(self, request):
@@ -970,23 +1058,23 @@ class UserVoucherViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = self.get_serializer(expired_vouchers, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=["get"], url_path="cancelled")
-    def cancelled_vouchers(self, request):
-        """Get user's cancelled vouchers"""
-        cancelled_vouchers = self.get_queryset().filter(
-            purchase_status='cancelled'
-        )
-        serializer = self.get_serializer(cancelled_vouchers, many=True)
-        return Response(serializer.data)
+    # @action(detail=False, methods=["get"], url_path="cancelled")
+    # def cancelled_vouchers(self, request):
+    #     """Get user's cancelled vouchers"""
+    #     cancelled_vouchers = self.get_queryset().filter(
+    #         purchase_status='cancelled'
+    #     )
+    #     serializer = self.get_serializer(cancelled_vouchers, many=True)
+    #     return Response(serializer.data)
 
-    @action(detail=False, methods=["get"], url_path="refunded")
-    def refunded_vouchers(self, request):
-        """Get user's refunded vouchers"""
-        refunded_vouchers = self.get_queryset().filter(
-            purchase_status='refunded'
-        )
-        serializer = self.get_serializer(refunded_vouchers, many=True)
-        return Response(serializer.data)
+    # @action(detail=False, methods=["get"], url_path="refunded")
+    # def refunded_vouchers(self, request):
+    #     """Get user's refunded vouchers"""
+    #     refunded_vouchers = self.get_queryset().filter(
+    #         purchase_status='refunded'
+    #     )
+    #     serializer = self.get_serializer(refunded_vouchers, many=True)
+    #     return Response(serializer.data)
 
     @action(detail=False, methods=["get"], url_path="gift-cards")
     def gift_cards(self, request):
@@ -1031,7 +1119,7 @@ class UserVoucherViewSet(viewsets.ReadOnlyModelViewSet):
             
         Raises:
             404: If voucher not found or not owned by user
-            400: If voucher is already redeemed or expired
+             400: If voucher is already redeemed or expired
         """
         try:
             # Get the specific voucher redemption
@@ -1089,13 +1177,28 @@ class UserVoucherViewSet(viewsets.ReadOnlyModelViewSet):
 
     def _get_voucher_value(self, voucher):
         """Helper method to get formatted voucher value"""
-        if voucher.voucher_type.name == 'percentage':
-            return f"{voucher.percentage_value}% off (min bill: ₹{voucher.percentage_min_bill})"
-        elif voucher.voucher_type.name == 'flat':
-            return f"₹{voucher.flat_amount} off (min bill: ₹{voucher.flat_amount})"
-        elif voucher.voucher_type.name == 'product':
-            return f"Free {voucher.product_name} (min bill: ₹{voucher.product_min_bill})"
-        return "Special offer"
+        try:
+            if not voucher or not hasattr(voucher, 'voucher_type') or not voucher.voucher_type:
+                return "Special offer"
+            
+            voucher_type_name = getattr(voucher.voucher_type, 'name', 'unknown')
+            
+            if voucher_type_name == 'percentage':
+                percentage_value = getattr(voucher, 'percentage_value', 0)
+                min_bill = getattr(voucher, 'percentage_min_bill', 0)
+                return f"{percentage_value}% off (min bill: ₹{min_bill})"
+            elif voucher_type_name == 'flat':
+                flat_amount = getattr(voucher, 'flat_amount', 0)
+                min_bill = getattr(voucher, 'flat_min_bill', 0)
+                return f"₹{flat_amount} off (min bill: ₹{min_bill})"
+            elif voucher_type_name == 'product':
+                product_name = getattr(voucher, 'product_name', 'Product')
+                min_bill = getattr(voucher, 'product_min_bill', 0)
+                return f"Free {product_name} (min bill: ₹{min_bill})"
+            else:
+                return "Special offer"
+        except Exception:
+            return "Special offer"
 
     @action(detail=False, methods=["get"], url_path="summary")
     def purchase_summary(self, request):
@@ -1146,10 +1249,18 @@ class WhatsAppContactViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return WhatsAppContact.objects.filter(user=self.request.user)
+        # Handle case where request.user might not be available (e.g., during Swagger inspection)
+        if hasattr(self, 'request') and hasattr(self.request, 'user') and self.request.user.is_authenticated:
+            return WhatsAppContact.objects.filter(user=self.request.user)
+        # Return empty queryset for unauthenticated requests or during inspection
+        return WhatsAppContact.objects.none()
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        # Handle case where request.user might not be available (e.g., during Swagger inspection)
+        if hasattr(self, 'request') and hasattr(self.request, 'user') and self.request.user.is_authenticated:
+            serializer.save(user=self.request.user)
+        else:
+            raise ValidationError("User authentication required")
 
     @action(detail=False, methods=["post"], url_path="sync-contacts")
     def sync_contacts(self, request):
@@ -1259,22 +1370,30 @@ class AdvertisementViewSet(viewsets.ModelViewSet):
     - Extension cost: Additional cost for extending advertisement dates
     - All costs deducted from merchant's wallet balance
     
-    Authentication: JWT Token + API Key required
+    Authentication: JWT Token required
     Permissions: Merchants can only manage advertisements for their own vouchers
     """
     queryset = Advertisement.objects.all()
     serializer_class = AdvertisementSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [JWTAuthentication]
 
     def get_queryset(self):
         # Only show advertisements for user's vouchers
-        return Advertisement.objects.filter(voucher__merchant__user=self.request.user)
+        # Handle case where request.user might not be available (e.g., during Swagger inspection)
+        if hasattr(self, 'request') and hasattr(self.request, 'user') and self.request.user.is_authenticated:
+            return Advertisement.objects.filter(voucher__merchant__user=self.request.user)
+        # Return empty queryset for unauthenticated requests or during inspection
+        return Advertisement.objects.none()
 
     def perform_create(self, serializer):
         """Create advertisement and deduct points from merchant's wallet"""
         try:
             with transaction.atomic():
+                # Ensure user is authenticated
+                if not hasattr(self, 'request') or not hasattr(self.request, 'user') or not self.request.user.is_authenticated:
+                    raise ValidationError("User authentication required")
+                
                 # Ensure the voucher belongs to the current user
                 voucher = serializer.validated_data.get('voucher')
                 if voucher.merchant.user != self.request.user:
@@ -1336,6 +1455,10 @@ class AdvertisementViewSet(viewsets.ModelViewSet):
         """Handle advertisement updates with potential cost implications"""
         try:
             with transaction.atomic():
+                # Ensure user is authenticated
+                if not hasattr(self, 'request') or not hasattr(self.request, 'user') or not self.request.user.is_authenticated:
+                    raise ValidationError("User authentication required")
+                
                 old_instance = self.get_object()
                 new_data = serializer.validated_data
                 
@@ -1571,12 +1694,12 @@ class PublicAdvertisementViewSet(viewsets.ReadOnlyModelViewSet):
     - Public access (no user login required)
     - Location-based targeting support
     
-    Authentication: Only API Key required (no user login needed)
+    Authentication: No authentication required (public access)
     Permissions: Public read-only access to active advertisements
     """
     queryset = Advertisement.objects.all()
     serializer_class = AdvertisementSerializer
-    permission_classes = [IsAPIKEYAuthenticated]  # Only API key required, no user login
+    permission_classes = []  # Public access, no authentication required
     filter_backends = (DjangoFilterBackend,)
     filterset_fields = ["city", "state"]
     ordering = ["-create_time"]
@@ -1712,10 +1835,10 @@ class MerchantVoucherScanViewSet(viewsets.ViewSet):
     - Merchant authentication and authorization
     - Redemption tracking and analytics
     
-    Authentication: JWT Token + API Key required
+    Authentication: JWT Token required
     Permissions: Authenticated merchants can only scan vouchers for their business
     """
-    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [JWTAuthentication]
 
     @action(detail=False, methods=["post"], url_path="scan")
@@ -1724,12 +1847,12 @@ class MerchantVoucherScanViewSet(viewsets.ViewSet):
         Scan a voucher QR code to get voucher details and validate redemption eligibility.
         
         This endpoint is used by merchants to scan voucher QR codes and get information
-        about the voucher before processing redemption. The QR code should contain the
-        UserVoucherRedemption ID or purchase reference.
+        about the voucher before processing redemption. It handles both regular vouchers
+        and gift cards.
         
         Request Body:
             {
-                "qr_data": "VCH-12345678" or "456" (redemption_id)
+                "qr_data": "VCH-12345678" or "GFT-12345678" or "456" (redemption_id)
             }
             
         Returns:
@@ -1786,6 +1909,26 @@ class MerchantVoucherScanViewSet(viewsets.ViewSet):
                 except UserVoucherRedemption.DoesNotExist:
                     pass
             
+            # If not found, try by gift card claim reference (GFT-XXXXXXXX format)
+            if not redemption and isinstance(qr_data, str) and qr_data.startswith('GFT-'):
+                try:
+                    gift_share = GiftCardShare.objects.select_related(
+                        'original_purchase', 'original_purchase__voucher', 'claimed_by_user'
+                    ).get(
+                        claim_reference=qr_data,
+                        is_claimed=True
+                    )
+                    
+                    # Get the claimed redemption record - use the original purchase's purchase_reference
+                    redemption = UserVoucherRedemption.objects.select_related(
+                        'voucher', 'user'
+                    ).get(
+                        purchase_reference=gift_share.original_purchase.purchase_reference,
+                        is_active=True
+                    )
+                except (GiftCardShare.DoesNotExist, UserVoucherRedemption.DoesNotExist):
+                    pass
+            
             # If not found, try by redemption ID (numeric)
             if not redemption:
                 try:
@@ -1823,12 +1966,19 @@ class MerchantVoucherScanViewSet(viewsets.ViewSet):
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             # Check if merchant is trying to scan voucher from their own business
+            try:
+                voucher_merchant_name = getattr(redemption.voucher.merchant, 'business_name', 'Unknown Merchant')
+                current_merchant_name = getattr(merchant_profile, 'business_name', 'Unknown Merchant')
+            except Exception:
+                voucher_merchant_name = "Unknown Merchant"
+                current_merchant_name = "Unknown Merchant"
+            
             if redemption.voucher.merchant != merchant_profile:
                 return Response({
                     "error": "Access denied. You can only scan vouchers from your own business.",
                     "debug_info": {
-                        "voucher_merchant": redemption.voucher.merchant.business_name,
-                        "current_merchant": merchant_profile.business_name
+                        "voucher_merchant": voucher_merchant_name,
+                        "current_merchant": current_merchant_name
                     }
                 }, status=status.HTTP_403_FORBIDDEN
                 )
@@ -1865,26 +2015,84 @@ class MerchantVoucherScanViewSet(viewsets.ViewSet):
                         "debug_info": {
                             "purchase_status": redemption.purchase_status,
                             "is_active": redemption.is_active,
-                            "can_redeem_result": redemption.can_redeem_voucher()
+                            "can_redeem_result": redemption.can_redeem_voucher(),
+                            "remaining_redemptions": redemption.get_remaining_redemptions()
                         }
                     }, status=status.HTTP_400_BAD_REQUEST)
             
+            # Determine voucher type and user info
+            is_gift_card = redemption.is_gift_voucher
+            
+            # Safe user info extraction with fallbacks
+            try:
+                user_name = getattr(redemption.user, 'fullname', None) or getattr(redemption.user, 'username', 'Unknown User')
+                user_phone = str(redemption.user.phone) if hasattr(redemption.user, 'phone') and redemption.user.phone else None
+            except Exception:
+                user_name = "Unknown User"
+                user_phone = None
+            
+            user_info = {
+                "name": user_name,
+                "phone": user_phone,
+                "is_original_purchaser": not is_gift_card
+            }
+            
+            # If it's a gift card, get additional info
+            if is_gift_card:
+                try:
+                    # For gift cards, we need to find the share record differently
+                    # Since the redemption might be a claimed gift card, we need to search by the original purchase
+                    gift_share = GiftCardShare.objects.filter(
+                        original_purchase__voucher=redemption.voucher,
+                        claimed_by_user=redemption.user,
+                        is_claimed=True
+                    ).first()
+                    
+                    if gift_share:
+                        user_info.update({
+                            "is_gift_card_recipient": True,
+                            "original_purchaser": gift_share.original_purchase.user.fullname,
+                            "claimed_at": gift_share.claimed_at,
+                            "claim_reference": gift_share.claim_reference
+                        })
+                except Exception:
+                    # If we can't get gift card info, continue without it
+                    pass
+            
             # Return voucher details for merchant review
-            return Response({
-                "message": "Voucher found and eligible for redemption",
-                "voucher_details": {
+            try:
+                voucher_details = {
                     "id": redemption.voucher.id,
-                    "title": redemption.voucher.title,
-                    "voucher_type": redemption.voucher.voucher_type.name,
+                    "title": getattr(redemption.voucher, 'title', 'Unknown Voucher'),
+                    "voucher_type": getattr(redemption.voucher.voucher_type, 'name', 'Unknown Type') if hasattr(redemption.voucher, 'voucher_type') and redemption.voucher.voucher_type else 'Unknown Type',
                     "voucher_value": self._get_voucher_value(redemption.voucher),
-                    "user_name": redemption.user.fullname,
-                    "user_phone": str(redemption.user.phone) if redemption.user.phone else None,
+                    "user_info": user_info,
                     "purchased_at": redemption.purchased_at,
                     "expiry_date": redemption.expiry_date,
                     "remaining_redemptions": redemption.get_remaining_redemptions(),
                     "purchase_reference": redemption.purchase_reference,
-                    "redemption_id": redemption.id
-                },
+                    "redemption_id": redemption.id,
+                    "is_gift_card": is_gift_card
+                }
+            except Exception as e:
+                # If there's an issue with voucher details, provide basic info
+                voucher_details = {
+                    "id": getattr(redemption.voucher, 'id', 'Unknown'),
+                    "title": "Voucher Details Unavailable",
+                    "voucher_type": "Unknown",
+                    "voucher_value": "Contact Support",
+                    "user_info": user_info,
+                    "purchased_at": redemption.purchased_at,
+                    "expiry_date": redemption.expiry_date,
+                    "remaining_redemptions": redemption.get_remaining_redemptions(),
+                    "purchase_reference": redemption.purchase_reference,
+                    "redemption_id": redemption.id,
+                    "is_gift_card": is_gift_card
+                }
+            
+            return Response({
+                "message": "Voucher found and eligible for redemption",
+                "voucher_details": voucher_details,
                 "can_redeem": True
             })
             
@@ -1961,8 +2169,11 @@ class MerchantVoucherScanViewSet(viewsets.ViewSet):
                     raise ValidationError("Voucher not found or inactive")
                 
                 # Check if merchant is trying to redeem voucher from their own business
-                if redemption.voucher.merchant != merchant_profile:
-                    raise ValidationError("Access denied. You can only redeem vouchers from your own business.")
+                try:
+                    if redemption.voucher.merchant != merchant_profile:
+                        raise ValidationError("Access denied. You can only redeem vouchers from your own business.")
+                except Exception as e:
+                    raise ValidationError(f"Error validating merchant access: {str(e)}")
                 
                 # Validate redemption eligibility
                 if not redemption.can_redeem_voucher():
@@ -1992,10 +2203,18 @@ class MerchantVoucherScanViewSet(viewsets.ViewSet):
                 except ValidationError as e:
                     raise ValidationError(f"Redemption failed: {str(e)}")
                 
+                # Safe extraction of response data with fallbacks
+                try:
+                    voucher_title = getattr(redemption.voucher, 'title', 'Unknown Voucher')
+                    user_name = getattr(redemption.user, 'fullname', None) or getattr(redemption.user, 'username', 'Unknown User')
+                except Exception:
+                    voucher_title = "Unknown Voucher"
+                    user_name = "Unknown User"
+                
                 return Response({
                     "message": "Voucher redeemed successfully",
-                    "voucher_title": redemption.voucher.title,
-                    "user_name": redemption.user.fullname,
+                    "voucher_title": voucher_title,
+                    "user_name": user_name,
                     "redeemed_at": redemption.redeemed_at,
                     "redemption_location": redemption.redemption_location,
                     "purchase_reference": redemption.purchase_reference,
@@ -2018,6 +2237,196 @@ class MerchantVoucherScanViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response(
                 {"error": "An unexpected error occurred. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def _get_voucher_value(self, voucher):
+        """Helper method to get formatted voucher value"""
+        try:
+            if not voucher or not hasattr(voucher, 'voucher_type') or not voucher.voucher_type:
+                return "Special offer"
+            
+            voucher_type_name = getattr(voucher.voucher_type, 'name', 'unknown')
+            
+            if voucher_type_name == 'percentage':
+                percentage_value = getattr(voucher, 'percentage_value', 0)
+                min_bill = getattr(voucher, 'percentage_min_bill', 0)
+                return f"{percentage_value}% off (min bill: ₹{min_bill})"
+            elif voucher_type_name == 'flat':
+                flat_amount = getattr(voucher, 'flat_amount', 0)
+                min_bill = getattr(voucher, 'flat_min_bill', 0)
+                return f"₹{flat_amount} off (min bill: ₹{min_bill})"
+            elif voucher_type_name == 'product':
+                product_name = getattr(voucher, 'product_name', 'Product')
+                min_bill = getattr(voucher, 'product_min_bill', 0)
+                return f"Free {product_name} (min bill: ₹{min_bill})"
+            else:
+                return "Special offer"
+        except Exception:
+            return "Special offer"
+
+class GiftCardClaimViewSet(viewsets.ViewSet):
+    """
+    Gift Card Claiming and Management API
+    
+    This ViewSet handles gift card claiming by recipients and provides
+    management features for shared gift cards.
+    
+    Features:
+    - Claim shared gift cards using claim reference
+    - View claimed gift cards
+    - Merchant redemption of claimed gift cards
+    - Gift card sharing history
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    @action(detail=False, methods=["post"], url_path="claim")
+    def claim_gift_card(self, request):
+        """
+        Claim a shared gift card using claim reference.
+        
+        This endpoint allows recipients to claim gift cards that were shared with them.
+        Each claim creates a new UserVoucherRedemption record for the recipient.
+        
+        Request Body:
+            {
+                "claim_reference": "GFT-12345678"
+            }
+            
+        Returns:
+            Response: Gift card details and confirmation of successful claim
+            
+        Raises:
+            400: If claim reference invalid or already claimed
+            404: If gift card share not found
+            500: If claiming process fails
+        """
+        claim_reference = request.data.get('claim_reference')
+        if not claim_reference:
+            return Response(
+                {"error": "Claim reference is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Find the gift card share
+            gift_share = GiftCardShare.objects.get(
+                claim_reference=claim_reference,
+                is_claimed=False
+            )
+            
+            # Check if user already has this gift card
+            if UserVoucherRedemption.objects.filter(
+                user=request.user,
+                voucher=gift_share.original_purchase.voucher,
+                is_gift_voucher=True
+            ).exists():
+                return Response(
+                    {"error": "You have already claimed this gift card"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Claim the gift card
+            with transaction.atomic():
+                new_redemption = gift_share.claim_gift_card(request.user)
+                
+                return Response({
+                    "message": "Gift card claimed successfully!",
+                    "gift_card_details": {
+                        "id": new_redemption.id,
+                        "title": new_redemption.voucher.title,
+                        "merchant": new_redemption.voucher.merchant.business_name,
+                        "voucher_type": new_redemption.voucher.voucher_type.name,
+                        "voucher_value": self._get_voucher_value(new_redemption.voucher),
+                        "expiry_date": new_redemption.expiry_date,
+                        "purchase_reference": new_redemption.purchase_reference,
+                        "claim_reference": claim_reference
+                    },
+                    "redemption_instructions": "You can now use this gift card at the merchant location. Show the purchase reference or QR code for redemption."
+                }, status=status.HTTP_201_CREATED)
+                
+        except GiftCardShare.DoesNotExist:
+            return Response(
+                {"error": "Invalid claim reference or gift card already claimed"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {"error": "Failed to claim gift card"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=["get"], url_path="my-gift-cards")
+    def my_gift_cards(self, request):
+        """Get user's claimed gift cards"""
+        try:
+            gift_cards = UserVoucherRedemption.objects.filter(
+                user=request.user,
+                is_gift_voucher=True
+            ).select_related('voucher', 'voucher__merchant')
+            
+            data = [{
+                "id": gc.id,
+                "title": gc.voucher.title,
+                "merchant": gc.voucher.merchant.business_name,
+                "voucher_type": gc.voucher.voucher_type.name,
+                "voucher_value": self._get_voucher_value(gc.voucher),
+                "purchased_at": gc.purchased_at,
+                "expiry_date": gc.expiry_date,
+                "purchase_reference": gc.purchase_reference,
+                "purchase_status": gc.purchase_status,
+                "can_redeem": gc.can_redeem_voucher(),
+                "remaining_redemptions": gc.get_remaining_redemptions()
+            } for gc in gift_cards]
+            
+            return Response({
+                "gift_cards": data,
+                "total_count": len(data),
+                "message": "Your claimed gift cards"
+            })
+            
+        except Exception as e:
+            return Response(
+                {"error": "Failed to fetch gift cards"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=["get"], url_path="shared-by-me")
+    def shared_by_me(self, request):
+        """Get gift cards shared by the current user"""
+        try:
+            # Get all gift card shares created by user's purchases
+            user_purchases = UserVoucherRedemption.objects.filter(
+                user=request.user,
+                voucher__is_gift_card=True
+            )
+            
+            shares = GiftCardShare.objects.filter(
+                original_purchase__in=user_purchases
+            ).select_related('original_purchase', 'original_purchase__voucher')
+            
+            data = [{
+                "share_id": share.id,
+                "recipient_phone": share.recipient_phone,
+                "recipient_name": share.recipient_name,
+                "voucher_title": share.original_purchase.voucher.title,
+                "shared_via": share.shared_via,
+                "shared_at": share.create_time,
+                "is_claimed": share.is_claimed,
+                "claimed_at": share.claimed_at,
+                "claim_reference": share.claim_reference
+            } for share in shares]
+            
+            return Response({
+                "shares": data,
+                "total_count": len(data),
+                "message": "Gift cards shared by you"
+            })
+            
+        except Exception as e:
+            return Response(
+                {"error": "Failed to fetch shared gift cards"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 

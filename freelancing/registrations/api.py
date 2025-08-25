@@ -24,7 +24,6 @@ from freelancing.registrations.serializers import (CheckEmailSerializer,
                                                 CheckUserDataSerializer,
                                                 RegistrationSerializer, VerificationOtpSerializer)
 
-from freelancing.utils.permissions import IsAPIKEYAuthenticated
 
 
 class RegistrationViewSet(
@@ -40,7 +39,7 @@ class RegistrationViewSet(
         "check_user_data": CheckUserDataSerializer,
         "send_sms": CheckEmailSerializer,
     }
-    permission_classes = (AllowAny, IsAPIKEYAuthenticated,)
+    permission_classes = (AllowAny,)
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):

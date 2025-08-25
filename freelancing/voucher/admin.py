@@ -7,7 +7,7 @@ from datetime import timedelta
 
 # Register your models here.
 
-from freelancing.voucher.models import Voucher, VoucherType, UserVoucherRedemption, Advertisement, WhatsAppContact
+from freelancing.voucher.models import Voucher, VoucherType, UserVoucherRedemption, Advertisement, WhatsAppContact, GiftCardShare
 
 
 @admin.register(VoucherType)
@@ -238,4 +238,74 @@ class UserVoucherRedemptionAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         return super().get_queryset(request).select_related(
             'user', 'voucher', 'voucher__merchant', 'voucher__merchant__user'
+        )
+
+
+@admin.register(GiftCardShare)
+class GiftCardShareAdmin(admin.ModelAdmin):
+    list_display = ('original_purchase', 'recipient_phone', 'recipient_name', 'shared_via', 'is_claimed', 'claimed_by_user', 'create_time')
+    list_filter = ('shared_via', 'is_claimed', 'create_time', 'claimed_at')
+    search_fields = ('recipient_phone', 'recipient_name', 'original_purchase__voucher__title', 'original_purchase__user__email')
+    readonly_fields = ('claim_reference', 'create_time', 'claimed_at', 'original_purchase_details')
+    date_hierarchy = 'create_time'
+    
+    fieldsets = (
+        ('Gift Card Information', {
+            'fields': ('original_purchase', 'original_purchase_details')
+        }),
+        ('Recipient Details', {
+            'fields': ('recipient_phone', 'recipient_name', 'shared_via')
+        }),
+        ('Claim Status', {
+            'fields': ('is_claimed', 'claimed_at', 'claimed_by_user', 'claim_reference')
+        }),
+        ('System Information', {
+            'fields': ('create_time', 'is_active', 'is_delete'),
+            'classes': ('collapse',)
+        })
+    )
+    
+    actions = ['mark_as_claimed', 'mark_as_unclaimed']
+    
+    def original_purchase_details(self, obj):
+        if obj.original_purchase:
+            return format_html(
+                '<strong>Voucher:</strong> {}<br>'
+                '<strong>Purchased by:</strong> {}<br>'
+                '<strong>Purchase Date:</strong> {}<br>'
+                '<strong>Reference:</strong> {}',
+                obj.original_purchase.voucher.title,
+                obj.original_purchase.user.fullname,
+                obj.original_purchase.purchased_at.strftime('%Y-%m-%d %H:%M'),
+                obj.original_purchase.purchase_reference
+            )
+        return "No purchase details"
+    original_purchase_details.short_description = 'Purchase Details'
+    
+    def mark_as_claimed(self, request, queryset):
+        count = 0
+        for gift_share in queryset:
+            if not gift_share.is_claimed:
+                gift_share.is_claimed = True
+                gift_share.claimed_at = timezone.now()
+                gift_share.save()
+                count += 1
+        self.message_user(request, f"Successfully marked {count} gift card shares as claimed.")
+    mark_as_claimed.short_description = "Mark selected gift card shares as claimed"
+    
+    def mark_as_unclaimed(self, request, queryset):
+        count = 0
+        for gift_share in queryset:
+            if gift_share.is_claimed:
+                gift_share.is_claimed = False
+                gift_share.claimed_at = None
+                gift_share.claimed_by_user = None
+                gift_share.save()
+                count += 1
+        self.message_user(request, f"Successfully marked {count} gift card shares as unclaimed.")
+    mark_as_unclaimed.short_description = "Mark selected gift card shares as unclaimed"
+    
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related(
+            'original_purchase', 'original_purchase__voucher', 'original_purchase__user', 'claimed_by_user'
         )

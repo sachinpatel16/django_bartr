@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction, DatabaseError
 from django.utils import timezone
 from freelancing.custom_auth.models import Wallet
+from decimal import Decimal
 
 User = get_user_model()
 
@@ -342,3 +343,73 @@ class UserVoucherRedemption(BaseModel):
         """Check if voucher is about to expire"""
         remaining_days = self.get_remaining_days()
         return remaining_days is not None and remaining_days <= days_threshold
+
+
+class GiftCardShare(BaseModel):
+    """
+    Track gift card shares to multiple users
+    Each share creates an independent redemption record for the recipient
+    """
+    original_purchase = models.ForeignKey(
+        UserVoucherRedemption, 
+        on_delete=models.CASCADE, 
+        related_name='gift_card_shares'
+    )
+    recipient_phone = models.CharField(max_length=20)  # Recipient's phone number
+    recipient_name = models.CharField(max_length=255, blank=True)  # Recipient's name (optional)
+    shared_via = models.CharField(
+        max_length=20, 
+        choices=[('whatsapp', 'WhatsApp'), ('sms', 'SMS'), ('email', 'Email')],
+        default='whatsapp'
+    )
+    is_claimed = models.BooleanField(default=False)  # Whether recipient has claimed the gift card
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    claimed_by_user = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='claimed_gift_cards'
+    )
+    claim_reference = models.CharField(max_length=100, unique=True, null=True, blank=True)
+    
+    class Meta:
+        unique_together = ['original_purchase', 'recipient_phone']
+        ordering = ['-create_time']
+    
+    def __str__(self):
+        return f"Gift card shared to {self.recipient_phone} by {self.original_purchase.user.fullname}"
+    
+    def save(self, *args, **kwargs):
+        # Generate unique claim reference if not provided
+        if not self.claim_reference:
+            import uuid
+            self.claim_reference = f"GFT-{uuid.uuid4().hex[:8].upper()}"
+        super().save(*args, **kwargs)
+    
+    def claim_gift_card(self, user):
+        """Claim the gift card for a specific user"""
+        if self.is_claimed:
+            raise ValidationError("Gift card has already been claimed")
+        
+        # Create a new UserVoucherRedemption for the recipient
+        new_redemption = UserVoucherRedemption.objects.create(
+            user=user,
+            voucher=self.original_purchase.voucher,
+            is_gift_voucher=True,
+            purchase_cost=Decimal('0.00'),  # Free for recipient
+            purchase_reference=self.claim_reference,
+            purchase_status='purchased',
+            expiry_date=self.original_purchase.expiry_date,
+            wallet_transaction_id=f"GIFT-{self.claim_reference}",
+            voucher_purchase_count=1,
+            max_redemption_allowed=1
+        )
+        
+        # Mark as claimed
+        self.is_claimed = True
+        self.claimed_at = timezone.now()
+        self.claimed_by_user = user
+        self.save()
+        
+        return new_redemption

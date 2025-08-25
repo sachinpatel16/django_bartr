@@ -12,6 +12,42 @@ CSRF_TRUSTED_ORIGINS = [
     'https://api.bartr.club'
 ]
 
+# CORS Configuration for Production
+CORS_ORIGIN_ALLOW_ALL = True
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    'https://bartrlatest-8l446.sevalla.app',
+    'https://api.bartr.club',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+]
+
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://\w+\.sevalla\.app$",
+    r"^https://\w+\.kinsta\.app$",
+]
+
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
 
 # ADMINS
 ADMINS = env.json('ADMINS')

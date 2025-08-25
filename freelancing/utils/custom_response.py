@@ -4,7 +4,6 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from rest_framework import permissions
-from .permissions import IsAPIKEYAuthenticated
 
 class CustomMessageResponseMixin:
     def create(self, request, *args, **kwargs):
@@ -82,7 +81,7 @@ def get_custom_response(queryset, serializer, total_count):
 
 
 class CustomListAllMixin:
-    @action(detail=False, methods=['post'], url_path='get_all_data', permission_classes=[permissions.IsAuthenticated, IsAPIKEYAuthenticated])
+    @action(detail=False, methods=['post'], url_path='get_all_data', permission_classes=[permissions.IsAuthenticated])
     def get_all_data(self, request):
         start = int(request.data.get('start', 0))
         limit = int(request.data.get('limit', 20))
@@ -111,7 +110,7 @@ class CustomListAllMixin:
 
 
 class CustomRetrieveMixin:
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated, IsAPIKEYAuthenticated])
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def get_retrieve_data(self, request, pk=None):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
@@ -125,7 +124,7 @@ class CustomRetrieveMixin:
 
 
 class CustomUpdateMixin:
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated, IsAPIKEYAuthenticated])
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def patch_data(self, request, pk=None):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -136,7 +135,7 @@ class CustomUpdateMixin:
 
         return Response({'errors': serializer.errors, 'success': 'false'}, status=400)
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated, IsAPIKEYAuthenticated])
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def patch_nested_data(self, request, pk=None):
         instance = self.get_object()
         # request.data.pop('order_items_details')
