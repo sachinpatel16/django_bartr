@@ -12,7 +12,7 @@ router.register("v1/my-vouchers", api.UserVoucherViewSet, basename="user-voucher
 router.register("v1/advertisements", api.AdvertisementViewSet, basename="advertisements")
 router.register("v1/public/advertisements", api.PublicAdvertisementViewSet, basename="public-advertisements")
 router.register("v1/merchant/scan", api.MerchantVoucherScanViewSet, basename="merchant-voucher-scan")
-
+router.register("v1/gift-card-claim", api.GiftCardClaimViewSet, basename="gift-card-claim")
 
 app_name = "voucher"
 

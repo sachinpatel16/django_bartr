@@ -48,11 +48,12 @@ from freelancing.custom_auth.serializers import (BaseUserSerializer,
                                             )
 # from trade_time_accounting.notification.FCM_manager import unsubscribe_from_topic
 from freelancing.registrations.serializers import CheckOtp
-from freelancing.utils.permissions import IsAPIKEYAuthenticated, IsReadAction, IsSuperAdminUser
+from freelancing.utils.permissions import  IsReadAction, IsSuperAdminUser
 from freelancing.utils.serializers import add_serializer_mixin
 
 from django.db.models import F, FloatField, ExpressionWrapper, Count
 from django.db.models.functions import ACos, Cos, Radians, Sin
+from drf_yasg.utils import swagger_auto_schema
 
 from rest_framework_simplejwt.authentication import JWTAuthentication # type: ignore
 User = get_user_model()
@@ -62,6 +63,7 @@ class UserAuthViewSet(viewsets.ViewSet):
     NEW_TOKEN_HEADER = "X-Token"
     permission_classes = (permissions.IsAuthenticated,)
     authentication_classes = [JWTAuthentication]
+    
     @classmethod
     def get_success_headers(cls, user):
         """
@@ -136,9 +138,13 @@ class UserAuthViewSet(viewsets.ViewSet):
 
             return Response({'message': 'Login Successful', 'data': user_details, 'success': 'true'},
                             status=status.HTTP_200_OK)
-
-    @action(methods=["post"], detail=False, permission_classes=[permissions.AllowAny,
-                                                                IsAPIKEYAuthenticated],
+    @swagger_auto_schema(
+        method="post",
+        request_body=UserAuthSerializer,  # 👈 force swagger to show body schema
+        responses={200: "Success"},
+        operation_description="Authenticate user using email/password or phone/otp and return JWT tokens.",
+    )
+    @action(methods=["post"], detail=False, permission_classes=[permissions.AllowAny],
             url_name="classic", url_path="classic")
     def classic_auth(self, request, *args, **kwargs):
         return self._auth(request, *args, for_agent=False, **kwargs)
@@ -187,8 +193,7 @@ class UserAuthViewSet(viewsets.ViewSet):
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     permission_classes = [
-        permissions.IsAuthenticated,
-        IsAPIKEYAuthenticated,
+        permissions.IsAuthenticated
         # IsReadAction | IsSelf,
     ]
     authentication_classes = [JWTAuthentication]
@@ -204,7 +209,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ["create", "metadata"]:
-            return [AllowAny(), IsAPIKEYAuthenticated]
+            return [AllowAny()]
 
         return super().get_permissions()
 
@@ -255,7 +260,7 @@ class UserViewSet(viewsets.ModelViewSet):
         detail=False,
         methods=["get", "put", "patch"],
         url_path="me",
-        permission_classes=[permissions.IsAuthenticated, IsAPIKEYAuthenticated, IsSelf]
+        permission_classes=[permissions.IsAuthenticated, IsSelf]
         )
     def me(self, request):
         if request.method in ["PUT", "PATCH"]:
@@ -270,7 +275,7 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(
         methods=["post"],
         detail=True,
-        permission_classes=[permissions.AllowAny, IsAPIKEYAuthenticated, IsSelf],
+        permission_classes=[permissions.AllowAny, IsSelf],
         url_path="photos/update_or_create",
         url_name="set_photo",
     )
@@ -288,7 +293,7 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(
         methods=["delete"],
         detail=True,
-        permission_classes=[permissions.AllowAny, IsAPIKEYAuthenticated, IsSelf],
+        permission_classes=[permissions.AllowAny, IsSelf],
         url_path="photos/(?P<id>[0-9]+)",
         url_name="delete_photo",
     )
@@ -454,7 +459,7 @@ class UserViewSet(viewsets.ModelViewSet):
 class CustomPermissionViewSet(viewsets.ModelViewSet):
     queryset = CustomPermission.objects.all()
     serializer_class = CustomPermissionSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [JWTAuthentication]
 
 
@@ -491,9 +496,7 @@ class UserPasswordResetView(APIView):
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.filter(is_active=True)
     serializer_class = CategorySerializer
-    permission_classes = [
-        IsAPIKEYAuthenticated,
-    ]
+    permission_classes = [permissions.AllowAny]
     http_method_names = ['get']
     filter_backends = (DjangoFilterBackend, SearchFilter)
     parser_classes = (MultiPartParser, FormParser)
@@ -504,7 +507,6 @@ class MerchantProfileViewSet(viewsets.ModelViewSet):
     serializer_class = MerchantProfileSerializer
     permission_classes = [
         permissions.IsAuthenticated,
-        IsAPIKEYAuthenticated,
     ]
     authentication_classes = [JWTAuthentication]
     filter_backends = (DjangoFilterBackend, SearchFilter)
@@ -514,7 +516,11 @@ class MerchantProfileViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         try:
-            serializer.save(user=self.request.user)
+            # Handle case where request.user might not be available (e.g., during Swagger inspection)
+            if hasattr(self, 'request') and hasattr(self.request, 'user') and self.request.user.is_authenticated:
+                serializer.save(user=self.request.user)
+            else:
+                raise ValidationError("User authentication required")
         except IntegrityError:
             raise ValidationError({
                 "detail": "A MerchantProfile already exists for this user."
@@ -562,19 +568,26 @@ class WalletViewSet(viewsets.ModelViewSet):
     serializer_class = WalletSerializer
     permission_classes = [
         permissions.IsAuthenticated,
-        IsAPIKEYAuthenticated,
     ]
     http_method_names = ['get']
     authentication_classes = [JWTAuthentication]
     filter_backends = (DjangoFilterBackend, SearchFilter)
 
     def get_queryset(self):
-        user = self.request.user
-        return Wallet.objects.filter(user=user)
+        # Handle case where request.user might not be available (e.g., during Swagger inspection)
+        if hasattr(self, 'request') and hasattr(self.request, 'user') and self.request.user.is_authenticated:
+            user = self.request.user
+            return Wallet.objects.filter(user=user)
+        # Return empty queryset for unauthenticated requests or during inspection
+        return Wallet.objects.none()
 
     def perform_create(self, serializer):
-        user = self.request.user
-        serializer.save(user=user)
+        # Handle case where request.user might not be available (e.g., during Swagger inspection)
+        if hasattr(self, 'request') and hasattr(self.request, 'user') and self.request.user.is_authenticated:
+            user = self.request.user
+            serializer.save(user=user)
+        else:
+            raise ValidationError("User authentication required")
 
     def destroy(self, request, *args, **kwargs):
         return Response({"detail": "Wallet cannot be deleted manually."}, status=status.HTTP_403_FORBIDDEN)
@@ -588,13 +601,17 @@ class WalletHistoryListView(generics.ListAPIView):
     ordering = ["-create_time"]
 
     def get_queryset(self):
-        user = self.request.user
-        wallet = Wallet.objects.filter(user=user).first()
+        # Handle case where request.user might not be available (e.g., during Swagger inspection)
+        if hasattr(self, 'request') and hasattr(self.request, 'user') and self.request.user.is_authenticated:
+            user = self.request.user
+            wallet = Wallet.objects.filter(user=user).first()
 
-        if not wallet:
-            return WalletHistory.objects.none()
+            if not wallet:
+                return WalletHistory.objects.none()
 
-        return wallet.histories.all()
+            return wallet.histories.all()
+        # Return empty queryset for unauthenticated requests or during inspection
+        return WalletHistory.objects.none()
 
 class WalletSummaryView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -616,7 +633,7 @@ class WalletSummaryView(APIView):
 
 class MerchantListAPIView(ListAPIView):
     serializer_class = MerchantListingSerializer
-    permission_classes = [IsAPIKEYAuthenticated]
+    # permission_classes = []
 
     def get_queryset(self):
         queryset = MerchantProfile.objects.filter(user__is_active=True)
@@ -699,7 +716,7 @@ class MerchantListAPIView(ListAPIView):
 
 class RazorpayWalletAPIView(APIView):
     """API for Razorpay wallet operations"""
-    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [JWTAuthentication]
 
     def __init__(self, **kwargs):
@@ -769,7 +786,7 @@ class RazorpayWalletAPIView(APIView):
 
 class RazorpayPaymentVerificationAPIView(APIView):
     """API for verifying Razorpay payment and adding points to wallet"""
-    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [JWTAuthentication]
 
     def __init__(self, **kwargs):
@@ -848,7 +865,7 @@ class RazorpayPaymentVerificationAPIView(APIView):
 class RazorpayTransactionListView(generics.ListAPIView):
     """API for listing user's Razorpay transactions"""
     serializer_class = RazorpayTransactionSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAPIKEYAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [JWTAuthentication]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['status', 'currency']
@@ -856,5 +873,9 @@ class RazorpayTransactionListView(generics.ListAPIView):
     ordering = ['-create_time']
 
     def get_queryset(self):
-        user = self.request.user
-        return RazorpayTransaction.objects.filter(user=user)
+        # Handle case where request.user might not be available (e.g., during Swagger inspection)
+        if hasattr(self, 'request') and hasattr(self.request, 'user') and self.request.user.is_authenticated:
+            user = self.request.user
+            return RazorpayTransaction.objects.filter(user=user)
+        # Return empty queryset for unauthenticated requests or during inspection
+        return RazorpayTransaction.objects.none()

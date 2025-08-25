@@ -82,6 +82,7 @@ LOCAL_APPS = [
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',  # CORS middleware should be at the top
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -90,7 +91,6 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'drf_api_logger.middleware.api_logger_middleware.APILoggerMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
     'freelancing.custom_auth.middleware.TokenBlacklistMiddleware',
     'django.middleware.locale.LocaleMiddleware',
 ]
@@ -208,14 +208,34 @@ TEMPLATED_EMAIL_FILE_EXTENSION = 'html'
 
 DRF_API_LOGGER_DATABASE = True
 
+CORS_ALLOW_ALL_ORIGINS = True
+
 # to allow to access api in react
 CORS_ORIGIN_ALLOW_ALL = True
 CORS_ALLOW_HEADERS = list(default_headers) + ["*"]
 # CSRF_TRUSTED_ORIGINS = [
 #     "http://13.202.126.232/",
 # ]
+# Allow your Swagger UI domain
+CORS_ALLOWED_ORIGINS = [
+    "https://bartrlatest-8l446.sevalla.app",
+    "https://api.bartr.club",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
 
 
+SWAGGER_SETTINGS = {
+    'SECURITY_DEFINITIONS': {
+        'Bearer': {
+            'type': 'apiKey',
+            'name': 'Authorization',
+            'in': 'header',
+            'description': "JWE Bearer token authorization. Example: `Bearer <your_token>`"
+        }
+    },
+    'USE_SESSION_AUTH': False,  # disables username/password
+}
 
 """
     This will allow to pass API KEY and User Token.
@@ -307,7 +327,7 @@ JAZZMIN_SETTINGS = {
 
     # List of model admins to search from the search bar, search bar omitted if excluded
     # If you want to use a single search field you dont need to use a list, you can use a simple string 
-    "search_model": ["auth.User", "auth.Group"],
+            "search_model": ["custom_auth.ApplicationUser", "auth.Group"],
 
     # Field name on user model that contains avatar ImageField/URLField/Charfield or a callable that receives the user
     "user_avatar": None,
@@ -326,7 +346,7 @@ JAZZMIN_SETTINGS = {
         {"name": "Support", "url": "https://github.com/farridav/django-jazzmin/issues", "new_window": True},
 
         # model admin to link to (Permissions checked against model)
-        {"model": "auth.User"},
+        {"model": "custom_auth.ApplicationUser"},
 
         # App with dropdown menu to all its models pages (Permissions checked against models)
         {"app": "books"},
@@ -339,7 +359,7 @@ JAZZMIN_SETTINGS = {
     # Additional links to include in the user menu on the top right ("app" url type is not allowed)
     "usermenu_links": [
         {"name": "Support", "url": "https://github.com/farridav/django-jazzmin/issues", "new_window": True},
-        {"model": "auth.user"}
+        {"model": "custom_auth.ApplicationUser"}
     ],
 
     #############
@@ -355,11 +375,11 @@ JAZZMIN_SETTINGS = {
     # Hide these apps when generating side menu e.g (auth)
     "hide_apps": [],
 
-    # Hide these models when generating side menu (e.g auth.user)
+    # Hide these models when generating side menu (e.g custom_auth.ApplicationUser)
     "hide_models": [],
 
     # List of apps (and/or models) to base side menu ordering off of (does not need to contain all apps/models)
-    "order_with_respect_to": ["auth", "books", "books.author", "books.book"],
+    "order_with_respect_to": ["custom_auth", "books", "books.author", "books.book"],
 
     # Custom links to append to app groups, keyed on app name
     "custom_links": {
@@ -375,7 +395,7 @@ JAZZMIN_SETTINGS = {
     # for the full list of 5.13.0 free icon classes
     "icons": {
         "auth": "fas fa-users-cog",
-        "auth.user": "fas fa-user",
+        "custom_auth.ApplicationUser": "fas fa-user",
         "auth.Group": "fas fa-users",
     },
     # Icons that are used when one is not manually specified
@@ -410,7 +430,7 @@ JAZZMIN_SETTINGS = {
     # - carousel
     "changeform_format": "horizontal_tabs",
     # override change forms on a per modeladmin basis
-    "changeform_format_overrides": {"auth.user": "collapsible", "auth.group": "vertical_tabs"},
+    "changeform_format_overrides": {"custom_auth.ApplicationUser": "collapsible", "auth.group": "vertical_tabs"},
     # Add a language dropdown into the admin
     "language_chooser": True,
 }
