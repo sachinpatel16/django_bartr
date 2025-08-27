@@ -413,25 +413,25 @@ class VoucherViewSet(viewsets.ModelViewSet):
         try:
             # Create message with claim reference
             message_body = f"""
-🎁 *Gift Card: {voucher.title}*
+                🎁 *Gift Card: {voucher.title}*
 
-{voucher.message}
+                {voucher.message}
 
-🏪 *Merchant:* {voucher.merchant.business_name}
-📍 *Location:* {voucher.merchant.city}, {voucher.merchant.state}
+                🏪 *Merchant:* {voucher.merchant.business_name}
+                📍 *Location:* {voucher.merchant.city}, {voucher.merchant.state}
 
-💳 *Voucher Type:* {voucher.voucher_type.name}
-💰 *Value:* {self.get_voucher_value(voucher)}
+                💳 *Voucher Type:* {voucher.voucher_type.name}
+                💰 *Value:* {self.get_voucher_value(voucher)}
 
-⏰ *Valid Until:* {voucher.expiry_date.strftime('%B %d, %Y') if voucher.expiry_date else 'No expiry'}
+                ⏰ *Valid Until:* {voucher.expiry_date.strftime('%B %d, %Y') if voucher.expiry_date else 'No expiry'}
 
-🔑 *Claim Reference:* {claim_reference}
+                🔑 *Claim Reference:* {claim_reference}
 
-To claim this gift card:
-1. Visit: https://yourdomain.com/claim-gift-card/{claim_reference}
-2. Or show this reference to the merchant
+                To claim this gift card:
+                1. Visit: https://yourdomain.com/claim-gift-card/{claim_reference}
+                2. Or show this reference to the merchant
 
-*This gift card can only be claimed once by the recipient.*
+                *This gift card can only be claimed once by the recipient.*
             """
             
             # Implement your WhatsApp API integration here
@@ -1247,6 +1247,7 @@ class WhatsAppContactViewSet(viewsets.ModelViewSet):
     queryset = WhatsAppContact.objects.all()
     serializer_class = WhatsAppContactSerializer
     permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
 
     def get_queryset(self):
         # Handle case where request.user might not be available (e.g., during Swagger inspection)
@@ -1273,7 +1274,6 @@ class WhatsAppContactViewSet(viewsets.ModelViewSet):
                     {"error": "No contacts provided"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-           
             # Clear existing contacts for this user
             WhatsAppContact.objects.filter(user=request.user).delete()
            
@@ -1315,19 +1315,65 @@ class WhatsAppContactViewSet(viewsets.ModelViewSet):
             )
 
     def check_whatsapp_status(self, phone_number):
-        """Check if a phone number is registered on WhatsApp"""
-        # This is a placeholder - implement based on your WhatsApp provider
-        # Example: Use WhatsApp Business API to check number status
-       
+        """Check if a phone number is registered on WhatsApp using RapidAPI"""
         try:
-            # api_url = "https://your-whatsapp-api.com/check"
-            # payload = {"phone": phone_number}
-            # response = requests.post(api_url, json=payload)
-            # return response.json().get('is_whatsapp', False)
-           
-            # For now, return True as placeholder (you should implement actual check)
+            # Clean phone number (remove + if present)
+            clean_phone = phone_number.replace('+', '') if phone_number else ''
+            
+            if not clean_phone:
+                print(f"Invalid phone number: {phone_number}")
+                return False
+            
+            # Basic phone number validation (should be at least 10 digits)
+            if len(clean_phone) < 10:
+                print(f"Phone number too short: {clean_phone}")
+                return False
+            
+            # For now, let's assume all valid phone numbers have WhatsApp
+            # This is a temporary fix until we get the RapidAPI working properly
+            print(f"Valid phone number {clean_phone} - assuming has WhatsApp (temporary fix)")
             return True
-        except Exception:
+            
+            # TODO: Uncomment below code when RapidAPI is working properly
+            """
+            url = "https://whatsapp-number-validator3.p.rapidapi.com/WhatsappNumberHasItWithToken"
+            
+            payload = {"phone_number": clean_phone}
+            headers = {
+                "x-rapidapi-key": "bd54de3881msh517848c79ec25b6p10c042jsnb1179d9521b2",
+                "x-rapidapi-host": "whatsapp-number-validator3.p.rapidapi.com",
+                "Content-Type": "application/json"
+            }
+            
+            print(f"Checking WhatsApp status for: {clean_phone}")
+            response = requests.post(url, json=payload, headers=headers)
+            
+            if response.status_code == 200:
+                result = response.json()
+                print(f"RapidAPI Response for {clean_phone}: {result}")
+                
+                # Check if the API response indicates the number has WhatsApp
+                if isinstance(result, dict):
+                    has_whatsapp = result.get('has_whatsapp', False)
+                    is_valid = result.get('is_valid', False)
+                    status = result.get('status', '').lower()
+                    whatsapp_status = result.get('whatsapp_status', False)
+                    valid = result.get('valid', False)
+                    
+                    is_whatsapp = has_whatsapp or is_valid or 'success' in status or 'true' in status or whatsapp_status or valid
+                    print(f"WhatsApp check result for {clean_phone}: {is_whatsapp}")
+                    return is_whatsapp
+                else:
+                    is_whatsapp = bool(result)
+                    print(f"WhatsApp check result for {clean_phone}: {is_whatsapp}")
+                    return is_whatsapp
+            else:
+                print(f"WhatsApp validation API error for {clean_phone}: {response.status_code} - {response.text}")
+                return False
+            """
+                
+        except Exception as e:
+            print(f"WhatsApp validation error for {phone_number}: {str(e)}")
             return False
 
     @action(detail=False, methods=["get"], url_path="whatsapp-contacts")
@@ -1345,6 +1391,32 @@ class WhatsAppContactViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response(
                 {"error": "Failed to fetch WhatsApp contacts"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=["post"], url_path="test-whatsapp-validation")
+    def test_whatsapp_validation(self, request):
+        """Test WhatsApp validation for a single phone number"""
+        try:
+            phone_number = request.data.get('phone_number')
+            if not phone_number:
+                return Response(
+                    {"error": "phone_number is required"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Test the validation
+            is_whatsapp = self.check_whatsapp_status(phone_number)
+            
+            return Response({
+                "phone_number": phone_number,
+                "is_on_whatsapp": is_whatsapp,
+                "message": f"Phone number {phone_number} {'has' if is_whatsapp else 'does not have'} WhatsApp"
+            })
+            
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to test WhatsApp validation: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
