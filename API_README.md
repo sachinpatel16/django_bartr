@@ -17,6 +17,8 @@
    - [Gift Card APIs](#gift-card-apis)
    - [Advertisement APIs](#advertisement-apis)
    - [Category APIs](#category-apis)
+   - [Merchant Scanning APIs](#merchant-scanning-apis)
+   - [Public Voucher Discovery APIs](#public-voucher-discovery-apis)
 5. [Error Handling](#error-handling)
 6. [Testing Examples](#testing-examples)
 
@@ -793,15 +795,37 @@ Authorization: Bearer <jwt_token>
 }
 ```
 
+### 3. Get Purchase Summary
+
+**Endpoint:** `GET /api/voucher/v1/my-vouchers/summary/`
+
+**Description:** Get summary statistics of user's voucher purchases.
+
+**Response:**
+
+```json
+{
+  "total_purchases": 15,
+  "total_spent": 150.0,
+  "active_vouchers": 8,
+  "redeemed_vouchers": 5,
+  "expired_vouchers": 2,
+  "cancelled_vouchers": 0,
+  "refunded_vouchers": 0,
+  "total_refunds": 0.0,
+  "gift_cards": 3
+}
+```
+
 ---
 
-## 📞 WhatsApp Contact APIs
+## 📞 WhatsApp Contact Management APIs
 
-### 1. Sync Phone Contacts
+### 1. Sync Phone Contacts (Bulk Validation)
 
 **Endpoint:** `POST /api/voucher/v1/whatsapp-contacts/sync-contacts/`
 
-**Description:** Synchronize user's phone contacts and check WhatsApp availability.
+**Description:** Synchronize user's phone contacts and check WhatsApp availability using RapidAPI bulk validation. The system automatically handles large contact lists by chunking them into groups of 10 (API limit) and processes them sequentially.
 
 **Request Body:**
 
@@ -815,7 +839,12 @@ Authorization: Bearer <jwt_token>
     {
       "name": "Jane Smith",
       "phone_number": "+919876543211"
+    },
+    {
+      "name": "Bob Johnson",
+      "phone_number": "+919876543212"
     }
+    // ... up to 100+ contacts supported
   ]
 }
 ```
@@ -824,17 +853,45 @@ Authorization: Bearer <jwt_token>
 
 ```json
 {
-  "message": "Synced 2 contacts, 2 on WhatsApp",
+  "message": "Synced 3 contacts, 2 on WhatsApp",
   "whatsapp_contacts": [
     {
       "id": 1,
       "name": "John Doe",
       "phone_number": "+919876543210",
       "is_on_whatsapp": true
+    },
+    {
+      "id": 2,
+      "name": "Jane Smith",
+      "phone_number": "+919876543211",
+      "is_on_whatsapp": true
     }
-  ]
+  ],
+  "validation_summary": {
+    "total_contacts": 3,
+    "whatsapp_contacts": 2,
+    "non_whatsapp_contacts": 1,
+    "chunks_processed": 1
+  }
 }
 ```
+
+**Bulk Processing Details:**
+
+- **API Limit**: 10 phone numbers per request (RapidAPI constraint)
+- **Automatic Chunking**: Large contact lists are automatically split into chunks of 10
+- **Sequential Processing**: Each chunk is processed with a 500ms delay to avoid rate limiting
+- **Efficient Validation**: Single API call per chunk instead of individual calls
+- **Progress Tracking**: Response includes validation summary with chunk information
+
+**Example with 25 Contacts:**
+
+- **Chunk 1**: Contacts 1-10 (API call 1)
+- **Chunk 2**: Contacts 11-20 (API call 2)
+- **Chunk 3**: Contacts 21-25 (API call 3)
+- **Total API Calls**: 3 (automatically managed)
+- **Processing Time**: ~1.5 seconds (including delays)
 
 ### 2. Get WhatsApp Contacts
 
@@ -844,15 +901,152 @@ Authorization: Bearer <jwt_token>
 
 **Response:** List of WhatsApp contacts
 
+### 3. Test WhatsApp Validation
+
+**Endpoint:** `POST /api/voucher/v1/whatsapp-contacts/test-whatsapp-validation/`
+
+**Description:** Test WhatsApp validation for a single phone number.
+
+**Request Body:**
+
+```json
+{
+  "phone_number": "+919876543210"
+}
+```
+
+**Response:**
+
+```json
+{
+  "phone_number": "+919876543210",
+  "is_on_whatsapp": true,
+  "message": "Phone number +919876543210 has WhatsApp"
+}
+```
+
+### 4. WhatsApp Bulk Validation API
+
+**Endpoint:** `https://whatsapp-number-validator3.p.rapidapi.com/WhatsappNumberHasItBulkWithToken`
+
+**Description:** Internal RapidAPI endpoint used for bulk WhatsApp validation. This is automatically called by the sync-contacts endpoint when processing large contact lists.
+
+**Request Format:**
+
+```json
+{
+  "phone_numbers": ["447748188019", "447999999999", "447999999977"]
+}
+```
+
+**Response Format:**
+
+```json
+[
+  {
+    "phone_number": "447748188019",
+    "status": "valid"
+  },
+  {
+    "phone_number": "447999999999",
+    "status": "invalid"
+  },
+  {
+    "phone_number": "447999999977",
+    "status": "valid"
+  }
+]
+```
+
+**Status Mapping:**
+
+- `"valid"` → `is_on_whatsapp: true`
+- `"invalid"` → `is_on_whatsapp: false`
+
+**API Constraints:**
+
+- **Maximum numbers per request**: 10
+- **Rate limiting**: 500ms delay between chunks
+- **Authentication**: RapidAPI key required
+- **Response time**: ~200-500ms per chunk
+
+### 5. Create WhatsApp Contact
+
+**Endpoint:** `POST /api/voucher/v1/whatsapp-contacts/`
+
+**Description:** Create a new WhatsApp contact manually.
+
+**Request Body:**
+
+```json
+{
+  "name": "John Doe",
+  "phone_number": "+919876543210",
+  "is_on_whatsapp": true
+}
+```
+
+**Response:** Created contact data
+
+### 6. Update WhatsApp Contact
+
+**Endpoint:** `PUT /api/voucher/v1/whatsapp-contacts/{id}/`
+
+**Description:** Update an existing WhatsApp contact.
+
+**Request Body:** Partial contact data
+
+**Response:** Updated contact data
+
+### 7. Delete WhatsApp Contact
+
+**Endpoint:** `DELETE /api/voucher/v1/whatsapp-contacts/{id}/`
+
+**Description:** Delete a WhatsApp contact.
+
+**Response:** 204 No Content
+
 ---
 
-## 🎁 Gift Card APIs
+## 🎁 Gift Card Management APIs
 
-### 1. Claim Gift Card
+### 1. Share Gift Card via WhatsApp
+
+**Endpoint:** `POST /api/voucher/v1/voucher/{id}/share-gift-card/`
+
+**Description:** Share a gift card voucher with multiple WhatsApp contacts.
+
+**Request Body:**
+
+```json
+{
+  "phone_numbers": ["+919876543210", "+919876543211"]
+}
+```
+
+**Response:**
+
+```json
+{
+  "message": "Gift card shared successfully to 2 contacts",
+  "success_count": 2,
+  "failed_numbers": [],
+  "shares_created": [
+    {
+      "phone_number": "+919876543210",
+      "claim_reference": "GFT-12345678",
+      "share_id": 1
+    }
+  ],
+  "note": "Each recipient can claim and use the gift card independently"
+}
+```
+
+### 2. Claim Gift Card
 
 **Endpoint:** `POST /api/voucher/v1/gift-card-claim/claim/`
 
-**Description:** Claim a shared gift card.
+**Description:** Claim a shared gift card using claim reference.
 
 **Request Body:**
 
@@ -876,29 +1070,72 @@ Authorization: Bearer <jwt_token>
     "expiry_date": "2024-12-31T23:59:59Z",
     "purchase_reference": "GFT-12345678",
     "claim_reference": "GFT-12345678"
-  }
+  },
+  "redemption_instructions": "You can now use this gift card at the merchant location"
 }
 ```
 
-### 2. Get My Gift Cards
+### 3. Get My Gift Cards
 
 **Endpoint:** `GET /api/voucher/v1/gift-card-claim/my-gift-cards/`
 
 **Description:** Get user's claimed gift cards.
 
-**Response:** List of claimed gift cards
+**Response:**
 
-### 3. Get Shared by Me
+```json
+{
+  "gift_cards": [
+    {
+      "id": 789,
+      "title": "Free Coffee Gift Card",
+      "merchant": "Coffee Shop",
+      "voucher_type": "product",
+      "voucher_value": "Free Coffee (min bill: ₹0)",
+      "purchased_at": "2024-01-01T12:00:00Z",
+      "expiry_date": "2024-12-31T23:59:59Z",
+      "purchase_reference": "GFT-12345678",
+      "purchase_status": "purchased",
+      "can_redeem": true,
+      "remaining_redemptions": 1
+    }
+  ],
+  "total_count": 1,
+  "message": "Your claimed gift cards"
+}
+```
+
+### 4. Get Shared by Me
 
 **Endpoint:** `GET /api/voucher/v1/gift-card-claim/shared-by-me/`
 
 **Description:** Get gift cards shared by the current user.
 
-**Response:** List of shared gift cards
+**Response:**
+
+```json
+{
+  "shares": [
+    {
+      "share_id": 1,
+      "recipient_phone": "+919876543210",
+      "recipient_name": "John Doe",
+      "voucher_title": "Free Coffee Gift Card",
+      "shared_via": "whatsapp",
+      "shared_at": "2024-01-01T10:00:00Z",
+      "is_claimed": true,
+      "claimed_at": "2024-01-01T12:00:00Z",
+      "claim_reference": "GFT-12345678"
+    }
+  ],
+  "total_count": 1,
+  "message": "Gift cards shared by you"
+}
+```
 
 ---
 
-## 📢 Advertisement APIs
+## 📢 Advertisement Management APIs
 
 ### 1. Create Advertisement
 
@@ -927,7 +1164,8 @@ Authorization: Bearer <jwt_token>
   "advertisement_id": 1,
   "voucher_title": "50% Off Coffee",
   "cost_deducted": 10.0,
-  "remaining_balance": 90.0
+  "remaining_balance": 90.0,
+  "transaction_note": "Advertisement Creation: 50% Off Coffee"
 }
 ```
 
@@ -935,7 +1173,7 @@ Authorization: Bearer <jwt_token>
 
 **Endpoint:** `GET /api/voucher/v1/advertisements/active/`
 
-**Description:** Get active advertisements.
+**Description:** Get active advertisements for the merchant.
 
 **Response:** List of active advertisements
 
@@ -943,9 +1181,56 @@ Authorization: Bearer <jwt_token>
 
 **Endpoint:** `GET /api/voucher/v1/advertisements/by-location/?city=Mumbai&state=Maharashtra`
 
-**Description:** Get advertisements by location.
+**Description:** Get advertisements by city and state (public access).
 
-**Response:** List of advertisements in specified location
+**Response:**
+
+```json
+{
+  "advertisements": [...],
+  "total_count": 5,
+  "location": "Mumbai, Maharashtra",
+  "message": "Advertisements available in Mumbai, Maharashtra"
+}
+```
+
+### 4. Get Advertisements by Category
+
+**Endpoint:** `GET /api/voucher/v1/advertisements/by-category/?category=1`
+
+**Description:** Get advertisements by voucher category (public access).
+
+**Response:**
+
+```json
+{
+  "advertisements": [...],
+  "total_count": 3,
+  "category_id": 1,
+  "message": "Advertisements in category 1"
+}
+```
+
+### 5. Update Advertisement
+
+**Endpoint:** `PUT /api/voucher/v1/advertisements/{id}/`
+
+**Description:** Update advertisement details (may incur extension costs).
+
+**Request Body:** Partial advertisement data
+
+**Response:**
+
+```json
+{
+  "message": "Advertisement updated successfully",
+  "advertisement_id": 1,
+  "voucher_title": "50% Off Coffee",
+  "extension_cost_deducted": 5.0,
+  "additional_days": 5,
+  "remaining_balance": 85.0
+}
+```
 
 ---
 
@@ -992,6 +1277,98 @@ Authorization: Bearer <jwt_token>
 
 ---
 
+## 🔍 Merchant Scanning & Redemption APIs
+
+### 1. Scan Voucher
+
+**Endpoint:** `POST /api/voucher/v1/merchant/scan/scan/`
+
+**Description:** Scan a voucher QR code to get voucher details and validate redemption eligibility.
+
+**Request Body:**
+
+```json
+{
+  "qr_data": "VCH-12345678"
+}
+```
+
+**Response:**
+
+```json
+{
+  "message": "Voucher found and eligible for redemption",
+  "voucher_details": {
+    "id": 1,
+    "title": "50% Off Coffee",
+    "voucher_type": "percentage",
+    "voucher_value": "50% off (min bill: ₹100)",
+    "user_info": {
+      "name": "John Doe",
+      "phone": "+919876543210",
+      "is_original_purchaser": true
+    },
+    "purchased_at": "2024-01-01T10:00:00Z",
+    "expiry_date": "2024-12-31T23:59:59Z",
+    "remaining_redemptions": 1,
+    "purchase_reference": "VCH-12345678",
+    "redemption_id": 456,
+    "is_gift_card": false
+  },
+  "can_redeem": true
+}
+```
+
+**QR Data Formats Supported:**
+
+- `VCH-XXXXXXXX`: Purchase reference format
+- `GFT-XXXXXXXX`: Gift card claim reference format
+- `456`: Direct redemption ID
+- `UUID`: Voucher UUID
+
+### 2. Redeem Voucher
+
+**Endpoint:** `POST /api/voucher/v1/merchant/scan/redeem/`
+
+**Description:** Redeem a scanned voucher by merchant.
+
+**Request Body:**
+
+```json
+{
+  "redemption_id": 456,
+  "location": "Main Store",
+  "notes": "Customer was very happy",
+  "quantity": 1
+}
+```
+
+**Response:**
+
+```json
+{
+  "message": "Voucher redeemed successfully",
+  "voucher_title": "50% Off Coffee",
+  "user_name": "John Doe",
+  "redeemed_at": "2024-01-01T15:00:00Z",
+  "redemption_location": "Main Store",
+  "purchase_reference": "VCH-12345678",
+  "quantity_redeemed": 1,
+  "remaining_redemptions": 0,
+  "merchant_name": "Coffee Shop",
+  "transaction_id": "WT-789-20241201120000"
+}
+```
+
+**Security Features:**
+
+- Merchants can only scan vouchers from their own business
+- Atomic database transactions prevent race conditions
+- Comprehensive validation of redemption eligibility
+- Support for both regular vouchers and gift cards
+
+---
+
 ## 🚨 Error Handling
 
 ### Common Error Responses
@@ -1017,7 +1394,11 @@ Authorization: Bearer <jwt_token>
 
 ```json
 {
-  "error": "Access denied. You don't have permission to perform this action."
+  "error": "Access denied. You can only scan vouchers from your own business.",
+  "debug_info": {
+    "voucher_merchant": "Coffee Shop",
+    "current_merchant": "Different Shop"
+  }
 }
 ```
 
@@ -1033,7 +1414,12 @@ Authorization: Bearer <jwt_token>
 
 ```json
 {
-  "error": "An unexpected error occurred. Please try again."
+  "error": "An unexpected error occurred. Please try again.",
+  "debug_info": {
+    "error_type": "ValidationError",
+    "error_message": "Voucher has expired",
+    "traceback": "Traceback hidden in production"
+  }
 }
 ```
 
@@ -1099,6 +1485,111 @@ curl -X POST "http://localhost:8000/api/voucher/v1/voucher/1/share-gift-card/" \
   -d '{"phone_numbers": ["+919876543210"]}'
 ```
 
+### WhatsApp Contact Management Test
+
+#### Step 1: Sync Contacts (Small List - 5 contacts)
+
+```bash
+curl -X POST "http://localhost:8000/api/voucher/v1/whatsapp-contacts/sync-contacts/" \
+  -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contacts": [
+      {"name": "John Doe", "phone_number": "+919876543210"},
+      {"name": "Jane Smith", "phone_number": "+919876543211"},
+      {"name": "Bob Johnson", "phone_number": "+919876543212"},
+      {"name": "Alice Brown", "phone_number": "+919876543213"},
+      {"name": "Charlie Wilson", "phone_number": "+919876543214"}
+    ]
+  }'
+```
+
+**Response (Small List):**
+
+```json
+{
+  "message": "Synced 5 contacts, 4 on WhatsApp",
+  "whatsapp_contacts": [...],
+  "validation_summary": {
+    "total_contacts": 5,
+    "whatsapp_contacts": 4,
+    "non_whatsapp_contacts": 1,
+    "chunks_processed": 1
+  }
+}
+```
+
+#### Step 2: Sync Large Contact List (25 contacts)
+
+```bash
+curl -X POST "http://localhost:8000/api/voucher/v1/whatsapp-contacts/sync-contacts/" \
+  -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contacts": [
+      {"name": "Contact 1", "phone_number": "+919876543210"},
+      {"name": "Contact 2", "phone_number": "+919876543211"},
+      // ... 23 more contacts
+      {"name": "Contact 25", "phone_number": "+919876543234"}
+    ]
+  }'
+```
+
+**Response (Large List):**
+
+```json
+{
+  "message": "Synced 25 contacts, 20 on WhatsApp",
+  "whatsapp_contacts": [...],
+  "validation_summary": {
+    "total_contacts": 25,
+    "whatsapp_contacts": 20,
+    "non_whatsapp_contacts": 5,
+    "chunks_processed": 3
+  }
+}
+```
+
+**Processing Details for 25 Contacts:**
+
+- **Chunk 1**: Contacts 1-10 → 1st API call
+- **Chunk 2**: Contacts 11-20 → 2nd API call (after 500ms delay)
+- **Chunk 3**: Contacts 21-25 → 3rd API call (after 500ms delay)
+- **Total Processing Time**: ~1.5 seconds
+- **API Calls Made**: 3 (automatically managed)
+
+#### Step 3: Get WhatsApp Contacts
+
+```bash
+curl -X GET "http://localhost:8000/api/voucher/v1/whatsapp-contacts/whatsapp-contacts/" \
+  -H "Authorization: Bearer <JWT_TOKEN>"
+```
+
+### Merchant Scanning Test
+
+#### Step 1: Scan Voucher
+
+```bash
+curl -X POST "http://localhost:8000/api/voucher/v1/merchant/scan/scan/" \
+  -H "Authorization: Bearer <MERCHANT_JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"qr_data": "VCH-12345678"}'
+```
+
+#### Step 2: Redeem Voucher
+
+```bash
+curl -X POST "http://localhost:8000/api/voucher/v1/merchant/scan/redeem/" \
+  -H "Authorization: Bearer <MERCHANT_JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "redemption_id": 456,
+    "location": "Main Store",
+    "notes": "Customer was very happy",
+    "quantity": 1
+  }'
+```
+
 ---
 
 ## 🔧 Configuration
@@ -1121,6 +1612,10 @@ RAZORPAY_KEY_SECRET=your_razorpay_key_secret
 WHATSAPP_API_KEY=your_whatsapp_api_key
 WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id
 
+# RapidAPI WhatsApp Validation
+RAPIDAPI_KEY=bd54de3881msh517848c79ec25b6p10c042jsnb1179d9521b2
+RAPIDAPI_WHATSAPP_HOST=whatsapp-number-validator3.p.rapidapi.com
+
 # File Storage
 MEDIA_URL=/media/
 MEDIA_ROOT=/path/to/media/
@@ -1133,6 +1628,7 @@ MEDIA_ROOT=/path/to/media/
 voucher_cost = 10  # Points required to purchase voucher
 gift_card_cost = 10  # Points required to purchase gift card
 advertisement_cost = 10  # Points required to create advertisement
+advertisement_extension_cost_per_day = 1  # Points per day for extension
 ```
 
 ---
@@ -1169,5 +1665,8 @@ advertisement_cost = 10  # Points required to create advertisement
 4. **Atomic Transactions**: All critical operations use database transactions for data consistency
 5. **Wallet Integration**: Vouchers are purchased using wallet points, with configurable costs
 6. **Location Targeting**: Advertisements support city/state-based targeting
+7. **QR Code Support**: Multiple QR code formats supported for voucher scanning
+8. **Contact Management**: WhatsApp contact synchronization with validation
+9. **Gift Card Workflow**: Complete gift card sharing, claiming, and redemption workflow
 
 This API system provides a complete voucher management solution with gift card sharing capabilities, merchant scanning, and comprehensive user management.

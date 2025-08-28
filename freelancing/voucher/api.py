@@ -46,6 +46,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import IntegrityError, DatabaseError
 from decimal import Decimal, InvalidOperation
+import time
 
 from freelancing.voucher.models import Voucher, WhatsAppContact, Advertisement, UserVoucherRedemption, VoucherType, GiftCardShare
 from freelancing.voucher.serializers import (
@@ -1277,23 +1278,47 @@ class WhatsAppContactViewSet(viewsets.ModelViewSet):
             # Clear existing contacts for this user
             WhatsAppContact.objects.filter(user=request.user).delete()
            
-            # Create new contacts
-            created_contacts = []
+            # Extract phone numbers for bulk validation
+            phone_numbers = []
+            contact_map = {}
+            
             for contact in contacts_data:
                 name = contact.get('name', '')
                 phone_number = contact.get('phone_number', '')
                
                 if phone_number:
-                    # Check if contact is on WhatsApp (implement your WhatsApp API check here)
-                    is_on_whatsapp = self.check_whatsapp_status(phone_number)
-                   
-                    contact_obj = WhatsAppContact.objects.create(
-                        user=request.user,
-                        name=name,
-                        phone_number=phone_number,
-                        is_on_whatsapp=is_on_whatsapp
-                    )
-                    created_contacts.append(contact_obj)
+                    # Clean phone number (remove + if present)
+                    clean_phone = phone_number.replace('+', '') if phone_number else ''
+                    
+                    # Basic phone number validation (should be at least 10 digits)
+                    if len(clean_phone) >= 10:
+                        phone_numbers.append(clean_phone)
+                        contact_map[clean_phone] = {
+                            'name': name,
+                            'original_phone': phone_number
+                        }
+            
+            if not phone_numbers:
+                return Response(
+                    {"error": "No valid phone numbers found"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Bulk check WhatsApp status using RapidAPI (handles chunking automatically)
+            whatsapp_status_map = self.check_whatsapp_status_bulk(phone_numbers)
+           
+            # Create new contacts with WhatsApp status
+            created_contacts = []
+            for clean_phone, contact_info in contact_map.items():
+                is_on_whatsapp = whatsapp_status_map.get(clean_phone, False)
+                
+                contact_obj = WhatsAppContact.objects.create(
+                    user=request.user,
+                    name=contact_info['name'],
+                    phone_number=contact_info['original_phone'],
+                    is_on_whatsapp=is_on_whatsapp
+                )
+                created_contacts.append(contact_obj)
            
             # Return only WhatsApp contacts
             whatsapp_contacts = WhatsAppContact.objects.filter(
@@ -1305,7 +1330,13 @@ class WhatsAppContactViewSet(viewsets.ModelViewSet):
            
             return Response({
                 "message": f"Synced {len(created_contacts)} contacts, {len(whatsapp_contacts)} on WhatsApp",
-                "whatsapp_contacts": serializer.data
+                "whatsapp_contacts": serializer.data,
+                "validation_summary": {
+                    "total_contacts": len(created_contacts),
+                    "whatsapp_contacts": len(whatsapp_contacts),
+                    "non_whatsapp_contacts": len(created_contacts) - len(whatsapp_contacts),
+                    "chunks_processed": (len(phone_numbers) + 9) // 10  # Calculate number of chunks
+                }
             })
            
         except Exception as e:
@@ -1375,6 +1406,97 @@ class WhatsAppContactViewSet(viewsets.ModelViewSet):
         except Exception as e:
             print(f"WhatsApp validation error for {phone_number}: {str(e)}")
             return False
+
+    def check_whatsapp_status_bulk(self, phone_numbers):
+        """
+        Check WhatsApp status for multiple phone numbers using RapidAPI bulk endpoint.
+        The API has a limit of 10 numbers per request, so we chunk larger lists.
+        
+        Args:
+            phone_numbers (list): List of clean phone numbers to validate
+            
+        Returns:
+            dict: Dictionary mapping phone numbers to WhatsApp status (True/False)
+        """
+        try:
+            if not phone_numbers:
+                return {}
+            
+            # API limit is 10 numbers per request
+            API_LIMIT = 10
+            status_map = {}
+            
+            # Process phone numbers in chunks of 10
+            for i in range(0, len(phone_numbers), API_LIMIT):
+                chunk = phone_numbers[i:i + API_LIMIT]
+                print(f"Processing chunk {i//API_LIMIT + 1}: {len(chunk)} phone numbers")
+                
+                # Make API call for this chunk
+                chunk_status_map = self._make_bulk_api_call(chunk)
+                status_map.update(chunk_status_map)
+                
+                # Add small delay between chunks to avoid rate limiting
+                if i + API_LIMIT < len(phone_numbers):
+                    import time
+                    time.sleep(0.5)  # 500ms delay between chunks
+            
+            print(f"Completed validation for {len(phone_numbers)} phone numbers in {len(phone_numbers)//API_LIMIT + (1 if len(phone_numbers) % API_LIMIT else 0)} chunks")
+            return status_map
+                
+        except Exception as e:
+            print(f"WhatsApp bulk validation error: {str(e)}")
+            # Fallback: assume all numbers have WhatsApp if there's an error
+            return {phone: True for phone in phone_numbers}
+
+    def _make_bulk_api_call(self, phone_numbers_chunk):
+        """
+        Make a single API call for a chunk of phone numbers (max 10).
+        
+        Args:
+            phone_numbers_chunk (list): List of up to 10 phone numbers
+            
+        Returns:
+            dict: Dictionary mapping phone numbers to WhatsApp status (True/False)
+        """
+        try:
+            url = "https://whatsapp-number-validator3.p.rapidapi.com/WhatsappNumberHasItBulkWithToken"
+            
+            payload = {"phone_numbers": phone_numbers_chunk}
+            headers = {
+                "x-rapidapi-key": "bd54de3881msh517848c79ec25b6p10c042jsnb1179d9521b2",
+                "x-rapidapi-host": "whatsapp-number-validator3.p.rapidapi.com",
+                "Content-Type": "application/json"
+            }
+            
+            print(f"Making API call for chunk: {phone_numbers_chunk}")
+            response = requests.post(url, json=payload, headers=headers)
+            
+            if response.status_code == 200:
+                result = response.json()
+                print(f"API Response for chunk: {result}")
+                
+                # Parse the response and create status map
+                status_map = {}
+                for item in result:
+                    phone_number = item.get('phone_number', '')
+                    status = item.get('status', '').lower()
+                    
+                    # Consider 'valid' status as having WhatsApp
+                    is_whatsapp = status == 'valid'
+                    status_map[phone_number] = is_whatsapp
+                    
+                    print(f"Phone {phone_number}: status={status}, has_whatsapp={is_whatsapp}")
+                
+                return status_map
+            else:
+                print(f"WhatsApp bulk validation API error for chunk: {response.status_code} - {response.text}")
+                # Fallback: assume all numbers in this chunk have WhatsApp if API fails
+                return {phone: True for phone in phone_numbers_chunk}
+                
+        except Exception as e:
+            print(f"API call error for chunk {phone_numbers_chunk}: {str(e)}")
+            # Fallback: assume all numbers in this chunk have WhatsApp if there's an error
+            return {phone: True for phone in phone_numbers_chunk}
 
     @action(detail=False, methods=["get"], url_path="whatsapp-contacts")
     def whatsapp_contacts(self, request):
