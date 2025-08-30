@@ -231,10 +231,21 @@ SWAGGER_SETTINGS = {
             'type': 'apiKey',
             'name': 'Authorization',
             'in': 'header',
-            'description': "JWE Bearer token authorization. Example: `Bearer <your_token>`"
+            'description': "JWT Bearer token authorization. Example: `Bearer <your_jwt_token>`"
         }
     },
     'USE_SESSION_AUTH': False,  # disables username/password
+    'SUPPORTED_SUBMIT_METHODS': ['get', 'post', 'put', 'delete', 'patch'],
+    'OPERATIONS_SORTER': 'alpha',
+    'TAGS_SORTER': 'alpha',
+    'DOC_EXPANSION': 'none',
+    'DEFAULT_MODEL_RENDERING': 'example',
+    'DEEP_LINKING': True,
+    'DISPLAY_OPERATION_ID': False,
+    'VALIDATOR_URL': None,
+    'PERSIST_AUTH': True,
+    'REFETCH_SCHEMA_WITH_AUTH': True,
+    'REFETCH_SCHEMA_ON_LOGOUT': True,
 }
 
 """

@@ -17,15 +17,68 @@ from rest_framework_simplejwt.authentication import JWTAuthentication  # type: i
 # For swagger
 schema_view = get_schema_view(
     openapi.Info(
-        title="Bartr",
+        title="Bartr API",
         default_version='v1',
-        description="API documentation for Trade Time Accounting",
-        terms_of_service="https://www.yourwebsite.com/terms/",
-        contact=openapi.Contact(email="contact@yourwebsite.com"),
-        license=openapi.License(name="BSD License"),
+        description="""
+        # 🚀 Bartr - Complete Voucher Management Platform API
+        
+        ## Overview
+        Bartr is a comprehensive voucher management platform that enables merchants to create and manage vouchers, 
+        users to discover and purchase vouchers, and provides gift card sharing via WhatsApp with multi-user claiming.
+        
+        ## Key Features
+        - **Voucher Management**: Complete CRUD operations for merchants
+        - **Gift Card Sharing**: WhatsApp integration with multi-user claiming
+        - **Wallet Integration**: Point-based voucher purchases
+        - **Merchant Scanning**: QR code-based voucher redemption
+        - **Location-based Advertising**: City/state targeting for promotions
+        - **WhatsApp Contact Management**: Bulk contact validation and synchronization
+        
+        ## Authentication
+        All API endpoints require JWT token authentication. Include the token in the Authorization header:
+        ```
+        Authorization: Bearer <your_jwt_token>
+        ```
+        
+        ## Base URLs
+        - **Production**: https://bartrlatest-8l446.sevalla.app/api/
+        - **Development**: http://localhost:8000/api/
+        
+        ## API Categories
+        1. **Authentication & User Management** - User registration, login, profile management
+        2. **Merchant Management** - Merchant profiles, business information
+        3. **Voucher System** - Voucher creation, management, and analytics
+        4. **Wallet & Payments** - Point management, Razorpay integration
+        5. **Gift Card Sharing** - WhatsApp integration, multi-user claiming
+        6. **Advertisement Management** - Location-based promotion
+        7. **Merchant Scanning** - Voucher redemption workflow
+        
+        ## Getting Started
+        1. Authenticate using `/api/custom_auth/v1/auth/classic/`
+        2. Use the returned JWT token for subsequent requests
+        3. Explore the API endpoints below
+        
+        For detailed documentation, visit: [API_README.md](https://github.com/your-repo/API_README.md)
+        """,
+        terms_of_service="https://bartr.club/terms/",
+        contact=openapi.Contact(
+            name="Bartr Support",
+            email="support@bartr.club",
+            url="https://bartr.club"
+        ),
+        license=openapi.License(
+            name="Commercial License",
+            url="https://bartr.club/license/"
+        ),
     ),
     public=True,
     permission_classes=(permissions.AllowAny,),
+    patterns=[
+        path('api/', include([
+            path('custom_auth/', include('freelancing.custom_auth.api_urls')),
+            path('voucher/', include('freelancing.voucher.api_urls')),
+        ])),
+    ],
 )
 
 urlpatterns = [
