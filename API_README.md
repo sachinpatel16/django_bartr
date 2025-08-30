@@ -1187,7 +1187,32 @@ Authorization: Bearer <jwt_token>
 
 ```json
 {
-  "advertisements": [...],
+  "advertisements": [
+    {
+      "id": 1,
+      "voucher_title": "50% Off Coffee",
+      "merchant_name": "Coffee Shop",
+      "banner_image": "http://localhost:8000/media/advertisements/banner1.jpg",
+      "start_date": "2024-01-01",
+      "end_date": "2024-12-31",
+      "city": "Mumbai",
+      "state": "Maharashtra",
+      "is_active": true,
+      "created_at": "2024-01-01T10:00:00Z"
+    },
+    {
+      "id": 2,
+      "voucher_title": "Free Dessert",
+      "merchant_name": "Sweet Treats",
+      "banner_image": "http://localhost:8000/media/advertisements/banner2.jpg",
+      "start_date": "2024-01-01",
+      "end_date": "2024-12-31",
+      "city": "Mumbai",
+      "state": "Maharashtra",
+      "is_active": true,
+      "created_at": "2024-01-01T11:00:00Z"
+    }
+  ],
   "total_count": 5,
   "location": "Mumbai, Maharashtra",
   "message": "Advertisements available in Mumbai, Maharashtra"
@@ -1204,7 +1229,21 @@ Authorization: Bearer <jwt_token>
 
 ```json
 {
-  "advertisements": [...],
+  "advertisements": [
+    {
+      "id": 3,
+      "voucher_title": "30% Off Pizza",
+      "merchant_name": "Pizza Palace",
+      "banner_image": "http://localhost:8000/media/advertisements/banner3.jpg",
+      "start_date": "2024-01-01",
+      "end_date": "2024-12-31",
+      "city": "Mumbai",
+      "state": "Maharashtra",
+      "category": "Food & Beverage",
+      "is_active": true,
+      "created_at": "2024-01-01T12:00:00Z"
+    }
+  ],
   "total_count": 3,
   "category_id": 1,
   "message": "Advertisements in category 1"
@@ -1509,7 +1548,36 @@ curl -X POST "http://localhost:8000/api/voucher/v1/whatsapp-contacts/sync-contac
 ```json
 {
   "message": "Synced 5 contacts, 4 on WhatsApp",
-  "whatsapp_contacts": [...],
+  "whatsapp_contacts": [
+    {
+      "id": 1,
+      "name": "John Doe",
+      "phone_number": "+919876543210",
+      "is_on_whatsapp": true,
+      "created_at": "2024-01-01T10:00:00Z"
+    },
+    {
+      "id": 2,
+      "name": "Jane Smith",
+      "phone_number": "+919876543211",
+      "is_on_whatsapp": true,
+      "created_at": "2024-01-01T10:00:00Z"
+    },
+    {
+      "id": 3,
+      "name": "Bob Johnson",
+      "phone_number": "+919876543212",
+      "is_on_whatsapp": true,
+      "created_at": "2024-01-01T10:00:00Z"
+    },
+    {
+      "id": 4,
+      "name": "Alice Brown",
+      "phone_number": "+919876543213",
+      "is_on_whatsapp": true,
+      "created_at": "2024-01-01T10:00:00Z"
+    }
+  ],
   "validation_summary": {
     "total_contacts": 5,
     "whatsapp_contacts": 4,
@@ -1540,7 +1608,43 @@ curl -X POST "http://localhost:8000/api/voucher/v1/whatsapp-contacts/sync-contac
 ```json
 {
   "message": "Synced 25 contacts, 20 on WhatsApp",
-  "whatsapp_contacts": [...],
+  "whatsapp_contacts": [
+    {
+      "id": 1,
+      "name": "Contact 1",
+      "phone_number": "+919876543210",
+      "is_on_whatsapp": true,
+      "created_at": "2024-01-01T10:00:00Z"
+    },
+    {
+      "id": 2,
+      "name": "Contact 2",
+      "phone_number": "+919876543211",
+      "is_on_whatsapp": true,
+      "created_at": "2024-01-01T10:00:00Z"
+    },
+    {
+      "id": 3,
+      "name": "Contact 3",
+      "phone_number": "+919876543212",
+      "is_on_whatsapp": true,
+      "created_at": "2024-01-01T10:00:00Z"
+    },
+    {
+      "id": 4,
+      "name": "Contact 4",
+      "phone_number": "+919876543213",
+      "is_on_whatsapp": true,
+      "created_at": "2024-01-01T10:00:00Z"
+    },
+    {
+      "id": 5,
+      "name": "Contact 5",
+      "phone_number": "+919876543214",
+      "is_on_whatsapp": true,
+      "created_at": "2024-01-01T10:00:00Z"
+    }
+  ],
   "validation_summary": {
     "total_contacts": 25,
     "whatsapp_contacts": 20,
