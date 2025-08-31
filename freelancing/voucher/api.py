@@ -467,74 +467,74 @@ class VoucherViewSet(viewsets.ModelViewSet):
             return f"Free {voucher.product_name}"
         return "Special offer"
 
-    @action(detail=False, methods=["get"], url_path="popular")
-    def popular_vouchers(self, request):
-        """
-        Get popular vouchers based on purchase and redemption activity.
+    # @action(detail=False, methods=["get"], url_path="popular")
+    # def popular_vouchers(self, request):
+    #     """
+    #     Get popular vouchers based on purchase and redemption activity.
         
-        This endpoint returns vouchers ranked by popularity score, calculated as:
-        (purchase_count * 2) + redemption_count. Only vouchers that have been
-        used (purchased or redeemed) are included, excluding gift cards from
-        public listing.
+    #     This endpoint returns vouchers ranked by popularity score, calculated as:
+    #     (purchase_count * 2) + redemption_count. Only vouchers that have been
+    #     used (purchased or redeemed) are included, excluding gift cards from
+    #     public listing.
         
-        Returns:
-            Response: JSON containing top 10 popular vouchers with popularity metrics
+    #     Returns:
+    #         Response: JSON containing top 10 popular vouchers with popularity metrics
             
-        Example Response:
-        {
-            "popular_vouchers": [
-                {
-                    "id": 1,
-                    "title": "50% Off Coffee",
-                    "merchant": "Coffee Shop",
-                    "purchase_count": 25,
-                    "redemption_count": 20,
-                    "popularity_score": 70,
-                    "voucher_type": "percentage",
-                    "category": "Food & Beverage",
-                    "image": "http://example.com/image.jpg"
-                }
-            ],
-            "total_count": 10,
-            "message": "Popular vouchers based on purchase and redemption activity (only used vouchers)"
-        }
-        """
-        try:
-            # Get popular vouchers based on purchase count and redemption count
-            # Only include vouchers that have been used (purchased or redeemed)
-            # Priority: purchase_count (most important), then redemption_count
-            top_vouchers = Voucher.objects.filter(
-                is_gift_card=False,  # Exclude gift cards from public listing
-                is_active=True
-            ).filter(
-                # Only include vouchers that have been used (purchased or redeemed)
-                models.Q(purchase_count__gt=0) | models.Q(redemption_count__gt=0)
-            ).annotate(
-                popularity_score=models.F('purchase_count') * 2 + models.F('redemption_count')
-            ).order_by("-popularity_score", "-purchase_count", "-redemption_count")[:10]
+    #     Example Response:
+    #     {
+    #         "popular_vouchers": [
+    #             {
+    #                 "id": 1,
+    #                 "title": "50% Off Coffee",
+    #                 "merchant": "Coffee Shop",
+    #                 "purchase_count": 25,
+    #                 "redemption_count": 20,
+    #                 "popularity_score": 70,
+    #                 "voucher_type": "percentage",
+    #                 "category": "Food & Beverage",
+    #                 "image": "http://example.com/image.jpg"
+    #             }
+    #         ],
+    #         "total_count": 10,
+    #         "message": "Popular vouchers based on purchase and redemption activity (only used vouchers)"
+    #     }
+    #     """
+    #     try:
+    #         # Get popular vouchers based on purchase count and redemption count
+    #         # Only include vouchers that have been used (purchased or redeemed)
+    #         # Priority: purchase_count (most important), then redemption_count
+    #         top_vouchers = Voucher.objects.filter(
+    #             is_gift_card=False,  # Exclude gift cards from public listing
+    #             is_active=True
+    #         ).filter(
+    #             # Only include vouchers that have been used (purchased or redeemed)
+    #             models.Q(purchase_count__gt=0) | models.Q(redemption_count__gt=0)
+    #         ).annotate(
+    #             popularity_score=models.F('purchase_count') * 2 + models.F('redemption_count')
+    #         ).order_by("-popularity_score", "-purchase_count", "-redemption_count")[:10]
            
-            data = [{
-                "id": v.id,
-                "title": v.title,
-                "merchant": v.merchant.business_name,
-                "purchase_count": v.purchase_count,
-                "redemption_count": v.redemption_count,
-                "popularity_score": v.purchase_count * 2 + v.redemption_count,
-                "voucher_type": v.voucher_type.name,
-                "category": v.category.name if v.category else None,
-                "image": v.get_display_image().url if v.get_display_image() else None
-            } for v in top_vouchers]
+    #         data = [{
+    #             "id": v.id,
+    #             "title": v.title,
+    #             "merchant": v.merchant.business_name,
+    #             "purchase_count": v.purchase_count,
+    #             "redemption_count": v.redemption_count,
+    #             "popularity_score": v.purchase_count * 2 + v.redemption_count,
+    #             "voucher_type": v.voucher_type.name,
+    #             "category": v.category.name if v.category else None,
+    #             "image": v.get_display_image().url if v.get_display_image() else None
+    #         } for v in top_vouchers]
            
-            return Response({
-                "popular_vouchers": data,
-                "total_count": len(data),
-                "message": "Popular vouchers based on purchase and redemption activity (only used vouchers)"
-            })
-        except Exception as e:
-            return Response(
-                {"error": "Failed to fetch popular vouchers"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+    #         return Response({
+    #             "popular_vouchers": data,
+    #             "total_count": len(data),
+    #             "message": "Popular vouchers based on purchase and redemption activity (only used vouchers)"
+    #         })
+    #     except Exception as e:
+    #         return Response(
+    #             {"error": "Failed to fetch popular vouchers"},
+    #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
+    #         )
 
 class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -667,7 +667,74 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
             "period": "Last 7 days",
             "message": "Trending vouchers based on recent purchase activity"
         })
-
+    @action(detail=False, methods=["get"], url_path="popular")
+    def popular_vouchers(self, request):
+        """
+        Get popular vouchers based on purchase and redemption activity.
+        
+        This endpoint returns vouchers ranked by popularity score, calculated as:
+        (purchase_count * 2) + redemption_count. Only vouchers that have been
+        used (purchased or redeemed) are included, excluding gift cards from
+        public listing.
+        
+        Returns:
+            Response: JSON containing top 10 popular vouchers with popularity metrics
+            
+        Example Response:
+        {
+            "popular_vouchers": [
+                {
+                    "id": 1,
+                    "title": "50% Off Coffee",
+                    "merchant": "Coffee Shop",
+                    "purchase_count": 25,
+                    "redemption_count": 20,
+                    "popularity_score": 70,
+                    "voucher_type": "percentage",
+                    "category": "Food & Beverage",
+                    "image": "http://example.com/image.jpg"
+                }
+            ],
+            "total_count": 10,
+            "message": "Popular vouchers based on purchase and redemption activity (only used vouchers)"
+        }
+        """
+        try:
+            # Get popular vouchers based on purchase count and redemption count
+            # Only include vouchers that have been used (purchased or redeemed)
+            # Priority: purchase_count (most important), then redemption_count
+            top_vouchers = Voucher.objects.filter(
+                is_gift_card=False,  # Exclude gift cards from public listing
+                is_active=True
+            ).filter(
+                # Only include vouchers that have been used (purchased or redeemed)
+                models.Q(purchase_count__gt=0) | models.Q(redemption_count__gt=0)
+            ).annotate(
+                popularity_score=models.F('purchase_count') * 2 + models.F('redemption_count')
+            ).order_by("-popularity_score", "-purchase_count", "-redemption_count")[:10]
+           
+            data = [{
+                "id": v.id,
+                "title": v.title,
+                "merchant": v.merchant.business_name,
+                "purchase_count": v.purchase_count,
+                "redemption_count": v.redemption_count,
+                "popularity_score": v.purchase_count * 2 + v.redemption_count,
+                "voucher_type": v.voucher_type.name,
+                "category": v.category.name if v.category else None,
+                "image": v.get_display_image().url if v.get_display_image() else None
+            } for v in top_vouchers]
+           
+            return Response({
+                "message": "Popular vouchers based on purchase and redemption activity (only used vouchers)",
+                "total_count": len(data),
+                "popular_vouchers": data
+            })
+        except Exception as e:
+            return Response(
+                {"error": "Failed to fetch popular vouchers"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 class VoucherPurchaseViewSet(viewsets.ViewSet):
     """
     Voucher Purchase and Redemption Management API
