@@ -633,7 +633,7 @@ class WalletSummaryView(APIView):
 
 class MerchantListAPIView(ListAPIView):
     serializer_class = MerchantListingSerializer
-    # permission_classes = []
+    permission_classes = []
 
     def get_queryset(self):
         queryset = MerchantProfile.objects.filter(user__is_active=True)
