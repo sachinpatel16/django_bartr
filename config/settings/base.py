@@ -246,7 +246,13 @@ SWAGGER_SETTINGS = {
     'PERSIST_AUTH': True,
     'REFETCH_SCHEMA_WITH_AUTH': True,
     'REFETCH_SCHEMA_ON_LOGOUT': True,
+    'SHOW_REQUEST_HEADERS': True,
+    'JSON_EDITOR': True,
+    'APIS_SORTER': 'alpha',
+    'DEFAULT_INFO': 'config.urls.schema_view.info',
+    'DEFAULT_API_URL': 'https://bartrlatest-8l446.sevalla.app/api/',
 }
+
 
 """
     This will allow to pass API KEY and User Token.

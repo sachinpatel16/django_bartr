@@ -500,6 +500,14 @@ class CategoryViewSet(viewsets.ModelViewSet):
     http_method_names = ['get']
     filter_backends = (DjangoFilterBackend, SearchFilter)
     parser_classes = (MultiPartParser, FormParser)
+    pagination_class = None
+    
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            "results": serializer.data
+        })
 
 # Create your views here.
 class MerchantProfileViewSet(viewsets.ModelViewSet):
@@ -656,6 +664,16 @@ class MerchantListAPIView(ListAPIView):
         category_id = self.request.query_params.get('category')
         if category_id:
             queryset = queryset.filter(category_id=category_id)
+
+        # City Filter
+        city = self.request.query_params.get('city')
+        if city:
+            queryset = queryset.filter(city__icontains=city)
+
+        # State Filter
+        state = self.request.query_params.get('state')
+        if state:
+            queryset = queryset.filter(state__icontains=state)
 
         # Filter by voucher availability
         has_vouchers = self.request.query_params.get('has_vouchers')

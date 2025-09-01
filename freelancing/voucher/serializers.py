@@ -32,7 +32,7 @@ class VoucherListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Voucher
         fields = [
-            'id', 'uuid', 'title', 'message', 'merchant_name', 'merchant_logo',
+            'id', 'uuid', 'title', 'message', 'merchant_name', 'merchant_logo', 'terms_conditions',
             'voucher_type_name', 'display_image', 'voucher_value', 'purchase_cost',
             'is_purchased', 'can_purchase', 'purchase_count', 'redemption_count', 'count',
             'percentage_value', 'percentage_min_bill', 'flat_amount', 'flat_min_bill',
