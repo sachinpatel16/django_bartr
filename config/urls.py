@@ -85,7 +85,10 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('health/', csrf_exempt(lambda request: JsonResponse({'status': 'healthy', 'message': 'Django application is running'})), name='health-check'),
     path('cors-test/', csrf_exempt(lambda request: JsonResponse({'cors': 'working', 'origin': request.META.get('HTTP_ORIGIN', 'unknown')})), name='cors-test'),
+    # Swagger Documentation URLs
     path('swagger/', login_required(schema_view.with_ui('swagger', cache_timeout=0)), name='schema-swagger-ui'),
+    path('redoc/', login_required(schema_view.with_ui('redoc', cache_timeout=0)), name='schema-redoc'),
+    path('swagger.json', login_required(schema_view.without_ui(cache_timeout=0)), name='schema-json'),
     path('accounts/login/', lambda request: redirect(f'/admin/login/?next=/swagger/')),  # Redirect to admin login with next parameter
     path('accounts/', include('django.contrib.auth.urls')),
     path('api/', include([
@@ -95,6 +98,7 @@ urlpatterns = [
     ])),
     path('i18n/', include('django.conf.urls.i18n')),  # Enable language switching
 ]
+
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

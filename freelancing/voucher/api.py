@@ -671,15 +671,15 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
     def popular_vouchers(self, request):
         """
         Get popular vouchers based on purchase and redemption activity.
-        
+       
         This endpoint returns vouchers ranked by popularity score, calculated as:
         (purchase_count * 2) + redemption_count. Only vouchers that have been
         used (purchased or redeemed) are included, excluding gift cards from
         public listing.
-        
+       
         Returns:
             Response: JSON containing top 10 popular vouchers with popularity metrics
-            
+           
         Example Response:
         {
             "popular_vouchers": [
@@ -687,6 +687,7 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
                     "id": 1,
                     "title": "50% Off Coffee",
                     "merchant": "Coffee Shop",
+                    "merchant_logo": "http://example.com/merchant/logo/coffee-shop-logo.jpg",
                     "purchase_count": 25,
                     "redemption_count": 20,
                     "popularity_score": 70,
@@ -712,11 +713,13 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
             ).annotate(
                 popularity_score=models.F('purchase_count') * 2 + models.F('redemption_count')
             ).order_by("-popularity_score", "-purchase_count", "-redemption_count")[:10]
-           
+            
             data = [{
                 "id": v.id,
                 "title": v.title,
                 "merchant": v.merchant.business_name,
+                "merchant_logo": v.merchant.logo.url if v.merchant.logo else None,
+                "terms_conditions": v.terms_conditions,
                 "purchase_count": v.purchase_count,
                 "redemption_count": v.redemption_count,
                 "popularity_score": v.purchase_count * 2 + v.redemption_count,
@@ -724,7 +727,7 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
                 "category": v.category.name if v.category else None,
                 "image": v.get_display_image().url if v.get_display_image() else None
             } for v in top_vouchers]
-           
+            
             return Response({
                 "message": "Popular vouchers based on purchase and redemption activity (only used vouchers)",
                 "total_count": len(data),
@@ -735,6 +738,7 @@ class PublicVoucherViewSet(viewsets.ReadOnlyModelViewSet):
                 {"error": "Failed to fetch popular vouchers"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
 class VoucherPurchaseViewSet(viewsets.ViewSet):
     """
     Voucher Purchase and Redemption Management API
