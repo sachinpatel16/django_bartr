@@ -434,7 +434,7 @@ class RazorpayPaymentVerificationSerializer(serializers.Serializer):
     """Serializer for verifying Razorpay payment"""
     razorpay_order_id = serializers.CharField(max_length=255)
     razorpay_payment_id = serializers.CharField(max_length=255)
-    razorpay_signature = serializers.CharField(max_length=255)
+    razorpay_signature = serializers.CharField(max_length=255, required=False, allow_blank=True)
 
 
 class RazorpayTransactionSerializer(serializers.ModelSerializer):

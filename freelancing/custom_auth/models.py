@@ -342,7 +342,7 @@ class Wallet(BaseModel):
         )
 
     def add_points(self, points: Decimal, note=None, ref_id=None):
-        """Add points to wallet (1 rupee = 1 point)"""
+        """Add points to wallet (1 rupee = 10 points)"""
         self.credit(points, note, ref_id)
 
     def deduct_points(self, points: Decimal, note=None, ref_id=None):
@@ -383,7 +383,7 @@ class RazorpayTransaction(BaseModel):
     
     # Transaction details
     amount = models.DecimalField(max_digits=12, decimal_places=2)  # Amount in rupees
-    points_to_add = models.DecimalField(max_digits=12, decimal_places=2)  # Points to be added (1 rupee = 1 point)
+    points_to_add = models.DecimalField(max_digits=12, decimal_places=2)  # Points to be added (1 rupee = 10 points)
     currency = models.CharField(max_length=3, default='INR')
     status = models.CharField(max_length=20, choices=TRANSACTION_STATUS, default='pending')
     
@@ -409,7 +409,8 @@ class RazorpayTransaction(BaseModel):
         self.razorpay_signature = signature
         self.save()
         
-        # Add points to wallet (1 rupee = 1 point)
+        # Add points to wallet (1 rupee = 10 points)
+        points_to_add = self.amount * 10  # 1 rupee = 10 points
         self.wallet.add_points(
             points_to_add,
             f"Razorpay payment - {self.razorpay_order_id}",

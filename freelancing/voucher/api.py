@@ -1217,19 +1217,34 @@ class UserVoucherViewSet(viewsets.ReadOnlyModelViewSet):
                         "error": "Voucher cannot be redeemed"
                     }, status=status.HTTP_400_BAD_REQUEST)
             
+            # Get merchant details
+            merchant = redemption.voucher.merchant
+            merchant_details = {
+                "merchant_id": merchant.id,
+                "business_name": merchant.business_name,
+                "logo": self._get_merchant_logo_url(merchant),
+                "banner_image": self._get_merchant_banner_url(merchant),
+                "address": merchant.address,
+                "city": merchant.city,
+                "state": merchant.state,
+                "phone": getattr(merchant, 'phone', None),
+                "email": getattr(merchant, 'email', None),
+                "category": merchant.category.name if merchant.category else None
+            }
+            
             # Return QR code data
             return Response({
                 "message": "Voucher QR code data",
                 "voucher_details": {
                     "id": redemption.voucher.id,
                     "title": redemption.voucher.title,
-                    "merchant_name": redemption.voucher.merchant.business_name,
                     "voucher_type": redemption.voucher.voucher_type.name,
                     "voucher_value": self._get_voucher_value(redemption.voucher),
                     "purchased_at": redemption.purchased_at,
                     "expiry_date": redemption.expiry_date,
                     "remaining_redemptions": redemption.get_remaining_redemptions()
                 },
+                "merchant_details": merchant_details,
                 "qr_code_data": {
                     "purchase_reference": redemption.purchase_reference,
                     "redemption_id": redemption.id,
@@ -1271,6 +1286,30 @@ class UserVoucherViewSet(viewsets.ReadOnlyModelViewSet):
                 return "Special offer"
         except Exception:
             return "Special offer"
+
+    def _get_merchant_logo_url(self, merchant):
+        """Helper method to get merchant logo URL"""
+        try:
+            if merchant and hasattr(merchant, 'logo') and merchant.logo:
+                request = getattr(self, 'request', None)
+                if request:
+                    return request.build_absolute_uri(merchant.logo.url)
+                return merchant.logo.url
+            return None
+        except Exception:
+            return None
+
+    def _get_merchant_banner_url(self, merchant):
+        """Helper method to get merchant banner URL"""
+        try:
+            if merchant and hasattr(merchant, 'banner_image') and merchant.banner_image:
+                request = getattr(self, 'request', None)
+                if request:
+                    return request.build_absolute_uri(merchant.banner_image.url)
+                return merchant.banner_image.url
+            return None
+        except Exception:
+            return None
 
     @action(detail=False, methods=["get"], url_path="summary")
     def purchase_summary(self, request):

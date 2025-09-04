@@ -2,7 +2,9 @@ import random
 import razorpay
 import hashlib
 import hmac
+import uuid
 from typing import Type
+from decimal import Decimal
 
 from django.db.models import Q
 from rest_framework.exceptions import PermissionDenied
@@ -777,12 +779,19 @@ class RazorpayWalletAPIView(APIView):
                 wallet=wallet,
                 razorpay_order_id=razorpay_order['id'],
                 amount=amount,
-                points_to_add=amount,  # 1 rupee = 1 point
+                points_to_add=amount * 10,  # 1 rupee = 10 points
                 currency=order_data['currency'],
                 description=serializer.validated_data.get('description', ''),
                 receipt=order_data['receipt'],
                 notes=order_data['notes']
             )
+            
+            # Prepare auto_fill data with only mobile, name, and email
+            auto_fill_data = {
+                'mobile': str(user.phone) if user.phone else None,
+                'name': user.fullname or f"{user.first_name} {user.last_name}".strip() or None,
+                'email': user.email
+            }
             
             return Response({
                 'success': True,
@@ -791,8 +800,10 @@ class RazorpayWalletAPIView(APIView):
                     'amount': amount,
                     'currency': order_data['currency'],
                     'receipt': order_data['receipt'],
-                    'transaction_id': transaction.id
-                }
+                    'transaction_id': transaction.id,
+                    'razorpay_key_id': settings.RAZORPAY_KEY_ID
+                },
+                'auto_fill': auto_fill_data
             }, status=status.HTTP_201_CREATED)
             
         except Exception as e:
@@ -820,7 +831,7 @@ class RazorpayPaymentVerificationAPIView(APIView):
         user = request.user
         order_id = serializer.validated_data['razorpay_order_id']
         payment_id = serializer.validated_data['razorpay_payment_id']
-        signature = serializer.validated_data['razorpay_signature']
+        signature = serializer.validated_data.get('razorpay_signature', '')
         
         try:
             # Get transaction record
@@ -830,19 +841,20 @@ class RazorpayPaymentVerificationAPIView(APIView):
                 status='pending'
             )
             
-            # Verify signature
-            expected_signature = hmac.new(
-                settings.RAZORPAY_KEY_SECRET.encode(),
-                f"{order_id}|{payment_id}".encode(),
-                hashlib.sha256
-            ).hexdigest()
-            
-            if not hmac.compare_digest(expected_signature, signature):
-                transaction.mark_failed('INVALID_SIGNATURE', 'Payment signature verification failed')
-                return Response({
-                    'success': False,
-                    'error': 'Invalid payment signature'
-                }, status=status.HTTP_400_BAD_REQUEST)
+            # Verify signature only if provided
+            if signature:
+                expected_signature = hmac.new(
+                    settings.RAZORPAY_KEY_SECRET.encode(),
+                    f"{order_id}|{payment_id}".encode(),
+                    hashlib.sha256
+                ).hexdigest()
+                
+                if not hmac.compare_digest(expected_signature, signature):
+                    transaction.mark_failed('INVALID_SIGNATURE', 'Payment signature verification failed')
+                    return Response({
+                        'success': False,
+                        'error': 'Invalid payment signature'
+                    }, status=status.HTTP_400_BAD_REQUEST)
             
             # Verify payment with Razorpay
             payment = self.client.payment.fetch(payment_id)
@@ -855,7 +867,7 @@ class RazorpayPaymentVerificationAPIView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             # Mark transaction as successful and add points
-            transaction.mark_successful(payment_id, signature)
+            transaction.mark_successful(payment_id, signature or '')
             
             return Response({
                     'success': True,
