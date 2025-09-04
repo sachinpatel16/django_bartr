@@ -411,7 +411,7 @@ class RazorpayTransaction(BaseModel):
         
         # Add points to wallet (1 rupee = 1 point)
         self.wallet.add_points(
-            self.amount,  # Direct amount as points
+            points_to_add,
             f"Razorpay payment - {self.razorpay_order_id}",
             self.razorpay_order_id
         )

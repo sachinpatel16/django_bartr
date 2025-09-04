@@ -858,15 +858,15 @@ class RazorpayPaymentVerificationAPIView(APIView):
             transaction.mark_successful(payment_id, signature)
             
             return Response({
-                'success': True,
-                'data': {
-                    'transaction_id': transaction.id,
-                    'amount': transaction.amount,
-                    'points_added': transaction.amount,
-                    'wallet_balance': transaction.wallet.balance,
-                    'payment_id': payment_id
-                }
-            }, status=status.HTTP_200_OK)
+                    'success': True,
+                    'data': {
+                        'transaction_id': transaction.id,
+                        'amount': transaction.amount,
+                        'points_added': transaction.points_to_add,  # Show actual points added (10x)
+                        'wallet_balance': transaction.wallet.balance,
+                        'payment_id': payment_id
+                    }
+                }, status=status.HTTP_200_OK)
             
         except RazorpayTransaction.DoesNotExist:
             return Response({
