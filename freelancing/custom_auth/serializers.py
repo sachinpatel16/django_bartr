@@ -424,7 +424,7 @@ class RazorpayOrderSerializer(serializers.Serializer):
     notes = serializers.JSONField(required=False)
 
     def validate_amount(self, value):
-        """Validate amount and ensure it's at least 1 rupee"""
+        """Validate amount and ensure it's at least 1 rupee (1 rupee = 10 points)"""
         if value < 1:
             raise serializers.ValidationError("Amount must be at least ₹1")
         return value
