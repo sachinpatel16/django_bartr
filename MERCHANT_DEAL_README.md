@@ -1,28 +1,30 @@
-# Merchant-to-Merchant Deal System
+# 🏪 Merchant-to-Merchant Deal System
 
 ## 🎯 Overview
 
-A revolutionary system that allows merchants to create deals and match with other merchants through a Tinder-like swiping interface. Merchants can exchange wallet points for business deals, creating a new way of business networking and collaboration.
+A revolutionary B2B platform that allows merchants to create deals using wallet points and exchange them with other merchants. The system enables business-to-business networking through a points-based deal exchange mechanism.
 
 ## 🚀 Key Features
 
 ### ✨ Core Functionality
 
-- **Deal Creation**: Merchants create deals with points requirements
-- **Tinder-like Interface**: Swipe right (interested) or left (not interested)
-- **Smart Matching**: Mutual interest automatically creates matches
+- **Deal Creation**: Merchants create deals with points (automatically deducted from wallet)
+- **Deal Discovery**: Browse and filter deals from other merchants
+- **Request System**: Request deals with custom messages and counter offers
+- **Deal Confirmation**: Accept/reject deal requests with terms negotiation
 - **Points Transfer**: Automatic wallet points transfer when deals complete
-- **Real-time Notifications**: Instant updates on matches and actions
+- **Usage Tracking**: Complete audit trail of all point transactions
+- **Real-time Notifications**: Instant updates on all deal activities
 - **Business Analytics**: Comprehensive statistics and insights
 
 ### 🔄 Complete Workflow
 
-1. **Create Deal** → Merchant posts a deal with points requirement
-2. **Discover Deals** → Browse other merchants' deals
-3. **Swipe** → Right swipe = interested, Left swipe = not interested
-4. **Match** → Mutual interest creates a match
-5. **Accept** → Both parties agree to the deal
-6. **Complete** → Points transfer and deal completion
+1. **Create Deal** → Points deducted from merchant's wallet
+2. **Discover Deals** → Browse other merchants' available deals
+3. **Request Deal** → Send request with message and counter offer
+4. **Accept/Reject** → Deal creator accepts or rejects request
+5. **Complete Deal** → Points transfer and deal completion
+6. **Track Usage** → Complete audit trail of all transactions
 
 ## 🛠️ Installation & Setup
 
@@ -58,84 +60,119 @@ python manage.py runserver
 
 #### 1. Create Your First Deal
 
+```bash
+POST /api/custom-auth/v1/merchant-deals/
+```
+
+**Request Body:**
+
 ```json
-POST /api/v1/merchant-deals/
 {
-    "title": "Electronics Exchange Deal",
-    "description": "Exchange electronics for 2000 points",
-    "points_required": 2000.00,
-    "deal_value": 2500.00,
-    "category": 1,
-    "expiry_date": "2024-12-31T23:59:59Z",
-    "min_points": 1500.00,
-    "max_points": 2500.00,
-    "preferred_cities": ["Mumbai", "Delhi"],
-    "terms_conditions": "Valid for 30 days",
-    "is_negotiable": true
+  "title": "Electronics Exchange Deal",
+  "description": "Exchange electronics for 2000 points",
+  "points_offered": 2000.0,
+  "deal_value": 2500.0,
+  "category": 1,
+  "expiry_date": "2024-12-31T23:59:59Z",
+  "preferred_cities": ["Mumbai", "Delhi"],
+  "preferred_categories": [1, 2],
+  "terms_conditions": "Valid for 30 days",
+  "is_negotiable": true
 }
 ```
+
+**Response:**
+
+```json
+{
+  "id": 1,
+  "merchant": 1,
+  "merchant_name": "Tech Store",
+  "title": "Electronics Exchange Deal",
+  "points_offered": 2000.0,
+  "points_remaining": 2000.0,
+  "deal_value": 2500.0,
+  "status": "active",
+  "create_time": "2024-01-15T10:30:00Z"
+}
+```
+
+**Note:** 2000 points are automatically deducted from your wallet when the deal is created.
 
 #### 2. Discover Other Deals
 
 ```bash
-GET /api/v1/deal-discovery/
+GET /api/custom-auth/v1/deal-discovery/
 ```
 
-#### 3. Swipe on Deals
+**Query Parameters:**
+
+- `category`: Filter by category ID
+- `min_points`: Minimum points filter
+- `max_points`: Maximum points filter
+- `search`: Search in title, description, or business name
+- `merchant__city`: Filter by city
+
+**Example:**
+
+```
+GET /api/custom-auth/v1/deal-discovery/?category=1&min_points=1000&max_points=3000&search=electronics
+```
+
+#### 3. Request a Deal
+
+```bash
+POST /api/custom-auth/v1/deal-requests/
+```
+
+**Request Body:**
 
 ```json
-POST /api/v1/merchant-swipes/
 {
-    "deal": 1,
-    "swipe_type": "right",  // "right" or "left"
-    "notes": "Great deal!",
-    "counter_offer": 1800.00
+  "deal": 2,
+  "points_requested": 1500.0,
+  "message": "I'm interested in this mobile accessories deal. Can we discuss terms?",
+  "counter_offer": 1200.0
 }
 ```
 
-#### 4. Manage Matches
+#### 4. Manage Deal Requests
 
 ```bash
-# Get your matches
-GET /api/v1/merchant-matches/
+# Get my requests
+GET /api/custom-auth/v1/deal-requests/
 
-# Accept a match
-POST /api/v1/merchant-matches/{id}/accept/
+# Accept a request
+POST /api/custom-auth/v1/deal-requests/{id}/accept/
 
-# Complete a deal
-POST /api/v1/merchant-matches/{id}/complete/
+# Reject a request
+POST /api/custom-auth/v1/deal-requests/{id}/reject/
 ```
 
-#### 5. Check Notifications
+#### 5. Complete Deals
+
+```bash
+# Get my confirmations
+GET /api/custom-auth/v1/deal-confirmations/
+
+# Complete a deal
+POST /api/custom-auth/v1/deal-confirmations/{id}/complete/
+```
+
+#### 6. Check Notifications
 
 ```bash
 # Get notifications
-GET /api/v1/merchant-notifications/
+GET /api/custom-auth/v1/merchant-notifications/
 
 # Mark as read
-POST /api/v1/merchant-notifications/{id}/mark_read/
-```
+POST /api/custom-auth/v1/merchant-notifications/{id}/mark-read/
 
-### For Developers
+# Mark all as read
+POST /api/custom-auth/v1/merchant-notifications/mark-all-read/
 
-#### API Endpoints Overview
-
-- **Deals**: `/api/v1/merchant-deals/`
-- **Discovery**: `/api/v1/deal-discovery/`
-- **Swipes**: `/api/v1/merchant-swipes/`
-- **Matches**: `/api/v1/merchant-matches/`
-- **Notifications**: `/api/v1/merchant-notifications/`
-- **Statistics**: `/api/v1/deal-stats/`
-
-#### Testing the System
-
-```bash
-# Run the test script
-python test_merchant_deal_system.py
-
-# Or test individual endpoints
-curl -X GET "http://localhost:8000/api/v1/deal-discovery/" \
-     -H "Authorization: Token YOUR_TOKEN"
+# Get unread count
+GET /api/custom-auth/v1/merchant-notifications/unread-count/
 ```
 
 ## 💡 Real-World Example
@@ -144,29 +181,122 @@ curl -X GET "http://localhost:8000/api/v1/deal-discovery/" \
 
 #### Step 1: Create Deals
 
-**Apple Store creates:**
+**Apple Store creates deal:**
 
-- Title: "Mobile Accessories Deal"
-- Points: 1500
-- Value: ₹2000
+```json
+POST /api/custom-auth/v1/merchant-deals/
+{
+  "title": "Mobile Accessories Deal",
+  "description": "Get mobile accessories for 1500 points",
+  "points_offered": 1500.00,
+  "deal_value": 2000.00,
+  "category": 1
+}
+```
 
-**Samsung Store creates:**
+_Result: 1500 points deducted from Apple's wallet_
 
-- Title: "Electronics Exchange"
-- Points: 2000
-- Value: ₹2500
+**Samsung Store creates deal:**
 
-#### Step 2: Discovery & Swiping
+```json
+POST /api/custom-auth/v1/merchant-deals/
+{
+  "title": "Electronics Exchange",
+  "description": "Exchange electronics for 2000 points",
+  "points_offered": 2000.00,
+  "deal_value": 2500.00,
+  "category": 1
+}
+```
 
-- Apple swipes RIGHT on Samsung's deal
-- Samsung swipes RIGHT on Apple's deal
-- **MATCH CREATED!** 🎉
+_Result: 2000 points deducted from Samsung's wallet_
 
-#### Step 3: Deal Completion
+#### Step 2: Discovery & Request
 
-- Both merchants agree to terms
-- 2000 points transferred from Samsung to Apple
-- Both businesses benefit from cross-promotion
+**Apple discovers Samsung's deal:**
+
+```bash
+GET /api/custom-auth/v1/deal-discovery/by-points/?points=2000
+```
+
+**Apple requests Samsung's deal:**
+
+```json
+POST /api/custom-auth/v1/deal-requests/
+{
+  "deal": 2,
+  "points_requested": 2000.00,
+  "message": "Great electronics deal! I'm interested."
+}
+```
+
+#### Step 3: Deal Confirmation
+
+**Samsung accepts the request:**
+
+```bash
+POST /api/custom-auth/v1/deal-requests/1/accept/
+```
+
+_Result: Deal confirmation created, 2000 points marked as used in Samsung's deal_
+
+#### Step 4: Complete Deal
+
+**Either merchant completes the deal:**
+
+```bash
+POST /api/custom-auth/v1/deal-confirmations/1/complete/
+```
+
+_Result: 2000 points transferred from Samsung to Apple, usage tracked_
+
+## 🔧 Key Features Explained
+
+### 1. **Points System**
+
+- 1 Rupee = 10 Points
+- Points stored in user's wallet
+- Automatic deduction when creating deals
+- Automatic transfer when completing deals
+
+### 2. **Deal Lifecycle**
+
+- **Created** → Points deducted from creator's wallet
+- **Requested** → Other merchants can request the deal
+- **Accepted** → Deal confirmation created
+- **Completed** → Points transferred, usage tracked
+
+### 3. **Security & Validation**
+
+- Only deal creator can accept/reject requests
+- Points validation before deal creation
+- Transaction tracking for all operations
+- Real-time notifications for all actions
+
+### 4. **Usage Tracking**
+
+- Complete audit trail of point usage
+- Transaction IDs for all operations
+- Detailed usage descriptions
+- Merchant-to-merchant transfer records
+
+## 📊 API Endpoints Overview
+
+### Core Endpoints
+
+- **Deals**: `/api/custom-auth/v1/merchant-deals/`
+- **Discovery**: `/api/custom-auth/v1/deal-discovery/`
+- **Requests**: `/api/custom-auth/v1/deal-requests/`
+- **Confirmations**: `/api/custom-auth/v1/deal-confirmations/`
+- **Notifications**: `/api/custom-auth/v1/merchant-notifications/`
+- **Statistics**: `/api/custom-auth/v1/deal-stats/`
+
+### Additional Endpoints
+
+- **Merchant Profile**: `/api/custom-auth/v1/merchant_profile/`
+- **Wallet**: `/api/custom-auth/v1/wallet/`
+- **Categories**: `/api/custom-auth/v1/category/`
+- **Merchant Listing**: `/api/custom-auth/v1/merchants/list/`
 
 ## 🔧 Configuration
 
@@ -187,7 +317,7 @@ DEBUG=True
 ### Customization Options
 
 - **Transfer Fees**: Configure in `MerchantPointsTransfer` model
-- **Match Expiry**: Set in `MerchantMatch` model
+- **Deal Expiry**: Set in `MerchantDeal` model
 - **Notification Types**: Extend in `MerchantNotification` model
 - **Deal Categories**: Manage through Django admin
 
@@ -206,7 +336,7 @@ DEBUG=True
 
 Access `/admin/` to manage:
 
-- All deals and matches
+- All deals and confirmations
 - Merchant profiles
 - Points transfers
 - System notifications
@@ -228,14 +358,14 @@ python manage.py migrate
 
 ```bash
 # Check token validity
-curl -X GET "http://localhost:8000/api/v1/deal-stats/" \
-     -H "Authorization: Token YOUR_TOKEN"
+curl -X GET "http://localhost:8000/api/custom-auth/v1/deal-stats/" \
+     -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
 #### 3. Points Transfer Failures
 
 - Check wallet balance
-- Verify match status
+- Verify deal confirmation status
 - Review transaction logs
 
 ### Debug Mode
@@ -286,19 +416,19 @@ Complete API documentation is available in `MERCHANT_DEAL_API.md`
 
 ```bash
 # Create deal
-POST /merchant-deals/
+POST /api/custom-auth/v1/merchant-deals/
 
 # Discover deals
-GET /deal-discovery/
+GET /api/custom-auth/v1/deal-discovery/
 
-# Swipe on deal
-POST /merchant-swipes/
+# Request deal
+POST /api/custom-auth/v1/deal-requests/
 
-# Get matches
-GET /merchant-matches/
+# Get confirmations
+GET /api/custom-auth/v1/deal-confirmations/
 
 # Complete deal
-POST /merchant-matches/{id}/complete/
+POST /api/custom-auth/v1/deal-confirmations/{id}/complete/
 ```
 
 ## 🤝 Contributing
@@ -348,4 +478,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 **Made with ❤️ for the merchant community**
 
 _Transform your business networking with the power of smart matching and points exchange!_
-
