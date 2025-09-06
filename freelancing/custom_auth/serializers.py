@@ -4,13 +4,16 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.translation import gettext_lazy as _
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from rest_framework.serializers import ModelSerializer
 
 from freelancing.custom_auth.models import (ApplicationUser, CustomPermission,
                                             MerchantProfile, Wallet,
-                                            Category, WalletHistory,RazorpayTransaction
+                                            Category, WalletHistory, RazorpayTransaction,
+                                            MerchantDeal, MerchantDealRequest, MerchantDealConfirmation, 
+                                            MerchantNotification, MerchantPointsTransfer, DealPointUsage
                                         )
 from freelancing.utils.validation import UniqueNameMixin
 
@@ -322,7 +325,7 @@ class MerchantProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = MerchantProfile
         fields = [
-            'id', 'user', 'category', 'business_name', 'email', 'phone', 'gender',
+            'id', 'user', 'category', 'business_name', 'owner_name', 'email', 'phone', 'gender',
             'gst_number', 'fssai_number', 'address', 'area', 'pin', 'city', 'state',
             'latitude', 'longitude', 'logo', 'banner_image'
         ]
@@ -377,7 +380,7 @@ class MerchantListingSerializer(serializers.ModelSerializer):
         model = MerchantProfile
         fields = [
             'id', 'user', 'user_name', 'user_email', 'user_phone', 'category', 'category_name',
-            'category_image', 'business_name', 'email', 'phone', 'gender', 'gst_number',
+            'category_image', 'business_name', 'owner_name', 'email', 'phone', 'gender', 'gst_number',
             'fssai_number', 'address', 'area', 'pin', 'city', 'state', 'latitude', 'longitude',
             'logo', 'logo_url', 'banner_image', 'banner_url', 'distance', 'available_vouchers_count', 'is_active',
             'create_time', 'update_time'
@@ -455,3 +458,200 @@ class RazorpayTransactionSerializer(serializers.ModelSerializer):
             'razorpay_payment_id', 'razorpay_signature', 'points_to_add', 'status',
             'error_code', 'error_description', 'create_time', 'update_time'
         ]
+
+# Merchant Deal System Serializers
+class MerchantDealSerializer(serializers.ModelSerializer):
+    merchant_name = serializers.CharField(source='merchant.business_name', read_only=True)
+    merchant_logo = serializers.SerializerMethodField()
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    is_expired = serializers.BooleanField(read_only=True)
+    request_count = serializers.SerializerMethodField()
+    confirmation_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = MerchantDeal
+        fields = [
+            'id', 'merchant', 'merchant_name', 'merchant_logo', 'title', 'description',
+            'points_offered', 'points_used', 'points_remaining', 'deal_value', 'category', 
+            'category_name', 'status', 'expiry_date', 'is_expired', 'preferred_cities',
+            'preferred_categories', 'terms_conditions', 'is_negotiable', 'request_count',
+            'confirmation_count', 'create_time'
+        ]
+        read_only_fields = ['merchant', 'points_used', 'points_remaining', 'create_time']
+    
+    def get_merchant_logo(self, obj):
+        if obj.merchant.logo:
+            return self.context['request'].build_absolute_uri(obj.merchant.logo.url)
+        return None
+    
+    def get_request_count(self, obj):
+        return obj.deal_requests_received.count()
+    
+    def get_confirmation_count(self, obj):
+        return obj.confirmations.filter(status='confirmed').count()
+    
+    def validate(self, data):
+        if data.get('expiry_date') and data['expiry_date'] <= timezone.now():
+            raise serializers.ValidationError("Expiry date must be in the future")
+        
+        return data
+
+
+class MerchantDealCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MerchantDeal
+        fields = [
+            'title', 'description', 'points_offered', 'deal_value', 'category',
+            'expiry_date', 'preferred_cities', 'preferred_categories', 
+            'terms_conditions', 'is_negotiable'
+        ]
+    
+    def validate_points_offered(self, value):
+        """Validate that merchant has enough points in wallet"""
+        user = self.context['request'].user
+        if hasattr(user, 'wallet'):
+            if user.wallet.balance < value:
+                raise serializers.ValidationError(
+                    f"Insufficient points in wallet. Available: {user.wallet.balance}, Required: {value}"
+                )
+        else:
+            raise serializers.ValidationError("Wallet not found for user")
+        return value
+    
+    def create(self, validated_data):
+        user = self.context['request'].user
+        validated_data['merchant'] = user.merchant_profile
+        
+        # Deduct points from wallet when deal is created
+        points_offered = validated_data['points_offered']
+        user.wallet.deduct_points(
+            points_offered,
+            f"Deal created: {validated_data['title']}",
+            f"DEAL_{uuid.uuid4().hex[:8].upper()}"
+        )
+        
+        return super().create(validated_data)
+
+
+class MerchantDealRequestSerializer(serializers.ModelSerializer):
+    requesting_merchant_name = serializers.CharField(source='requesting_merchant.business_name', read_only=True)
+    deal_title = serializers.CharField(source='deal.title', read_only=True)
+    deal_merchant = serializers.CharField(source='deal.merchant.business_name', read_only=True)
+    
+    class Meta:
+        model = MerchantDealRequest
+        fields = [
+            'id', 'requesting_merchant', 'requesting_merchant_name', 'deal', 'deal_title', 
+            'deal_merchant', 'status', 'request_time', 'message', 'points_requested', 'counter_offer'
+        ]
+        read_only_fields = ['requesting_merchant', 'request_time']
+    
+    def validate(self, data):
+        # Check if merchant is requesting their own deal
+        if data['deal'].merchant == data['requesting_merchant']:
+            raise serializers.ValidationError("You cannot request your own deal")
+        
+        # Check if already requested
+        if MerchantDealRequest.objects.filter(
+            requesting_merchant=data['requesting_merchant'], 
+            deal=data['deal']
+        ).exists():
+            raise serializers.ValidationError("You have already requested this deal")
+        
+        # Check if deal has enough remaining points
+        if data['points_requested'] > data['deal'].points_remaining:
+            raise serializers.ValidationError(
+                f"Requested points ({data['points_requested']}) exceed available points ({data['deal'].points_remaining})"
+            )
+        
+        return data
+
+
+class MerchantDealConfirmationSerializer(serializers.ModelSerializer):
+    deal_title = serializers.CharField(source='deal.title', read_only=True)
+    merchant1_name = serializers.CharField(source='merchant1.business_name', read_only=True)
+    merchant2_name = serializers.CharField(source='merchant2.business_name', read_only=True)
+    merchant1_logo = serializers.SerializerMethodField()
+    merchant2_logo = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = MerchantDealConfirmation
+        fields = [
+            'id', 'deal', 'deal_title', 'merchant1', 'merchant1_name', 'merchant1_logo',
+            'merchant2', 'merchant2_name', 'merchant2_logo', 'status', 'confirmation_time',
+            'completed_time', 'points_exchanged', 'deal_terms',
+            'merchant1_notes', 'merchant2_notes'
+        ]
+        read_only_fields = ['confirmation_time']
+    
+    def get_merchant1_logo(self, obj):
+        if obj.merchant1.logo:
+            return self.context['request'].build_absolute_uri(obj.merchant1.logo.url)
+        return None
+    
+    def get_merchant2_logo(self, obj):
+        if obj.merchant2.logo:
+            return self.context['request'].build_absolute_uri(obj.merchant2.logo.url)
+        return None
+
+
+
+
+class MerchantNotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MerchantNotification
+        fields = [
+            'id', 'notification_type', 'title', 'message', 'deal', 'match',
+            'is_read', 'read_time', 'action_url', 'action_data', 'create_time'
+        ]
+        read_only_fields = ['create_time']
+
+
+class MerchantPointsTransferSerializer(serializers.ModelSerializer):
+    from_merchant_name = serializers.CharField(source='from_merchant.business_name', read_only=True)
+    to_merchant_name = serializers.CharField(source='to_merchant.business_name', read_only=True)
+    
+    class Meta:
+        model = MerchantPointsTransfer
+        fields = [
+            'id', 'match', 'from_merchant', 'from_merchant_name', 'to_merchant',
+            'to_merchant_name', 'points_amount', 'transfer_fee', 'net_amount',
+            'status', 'transfer_time', 'transaction_id', 'notes', 'create_time'
+        ]
+        read_only_fields = ['transfer_time', 'create_time']
+
+
+class DealDiscoverySerializer(serializers.Serializer):
+    """Serializer for deal discovery with filters"""
+    category = serializers.IntegerField(required=False)
+    min_points = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    max_points = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    city = serializers.CharField(required=False)
+    search_query = serializers.CharField(required=False)
+    page = serializers.IntegerField(default=1)
+    page_size = serializers.IntegerField(default=20)
+
+
+class DealPointUsageSerializer(serializers.ModelSerializer):
+    deal_title = serializers.CharField(source='deal.title', read_only=True)
+    from_merchant_name = serializers.CharField(source='from_merchant.business_name', read_only=True)
+    to_merchant_name = serializers.CharField(source='to_merchant.business_name', read_only=True)
+    
+    class Meta:
+        model = DealPointUsage
+        fields = [
+            'id', 'deal', 'deal_title', 'confirmation', 'from_merchant', 'from_merchant_name',
+            'to_merchant', 'to_merchant_name', 'usage_type', 'points_used', 
+            'usage_description', 'transaction_id', 'create_time'
+        ]
+        read_only_fields = ['transaction_id', 'create_time']
+
+
+class DealStatsSerializer(serializers.Serializer):
+    """Serializer for deal statistics"""
+    total_deals = serializers.IntegerField()
+    active_deals = serializers.IntegerField()
+    total_requests = serializers.IntegerField()
+    successful_deals = serializers.IntegerField()
+    total_points_offered = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_points_used = serializers.DecimalField(max_digits=12, decimal_places=2)

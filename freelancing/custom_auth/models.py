@@ -283,6 +283,7 @@ class MerchantProfile(BaseModel):
     )
     
     business_name = models.CharField(max_length=255)
+    owner_name = models.CharField(_("Owner Name"), max_length=255, null=True, blank=True)
     email = models.EmailField(_("Merchant Email"), null=True, blank=True)
     phone = PhoneNumberField(_("Merchant Phone"), null=True, blank=True)
     gender = models.CharField(max_length=10, choices=[("male", "Male"), ("female", "Female"), ("others", "Others")], null=True, blank=True)
@@ -482,3 +483,259 @@ class SiteSetting(BaseModel):
             return SiteSetting.objects.get(key=key).value
         except SiteSetting.DoesNotExist:
             return default
+
+class MerchantDeal(BaseModel):
+    """Model for merchant deals with point-based system"""
+    DEAL_STATUS = (
+        ('active', 'Active'),
+        ('inactive', 'Inactive'),
+        ('expired', 'Expired'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+    )
+    
+    merchant = models.ForeignKey(MerchantProfile, on_delete=models.CASCADE, related_name='deals_created')
+    title = models.CharField(max_length=255)
+    description = models.TextField()
+    points_offered = models.DecimalField(max_digits=12, decimal_places=2)  # Points offered by merchant
+    deal_value = models.DecimalField(max_digits=12, decimal_places=2)  # Actual value of deal
+    category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True)
+    status = models.CharField(max_length=20, choices=DEAL_STATUS, default='active')
+    expiry_date = models.DateTimeField(null=True, blank=True)
+    
+    # Deal details
+    points_used = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # Points used from this deal
+    points_remaining = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # Remaining points
+    
+    # Location preferences
+    preferred_cities = models.JSONField(default=list, blank=True)  # List of preferred cities
+    preferred_categories = models.ManyToManyField(Category, related_name='preferred_deals', blank=True)
+    
+    # Deal terms
+    terms_conditions = models.TextField(blank=True, null=True)
+    is_negotiable = models.BooleanField(default=True)
+    
+    def save(self, *args, **kwargs):
+        # Calculate remaining points
+        self.points_remaining = self.points_offered - self.points_used
+        super().save(*args, **kwargs)
+    
+    class Meta:
+        ordering = ['-create_time']
+    
+    def __str__(self):
+        return f"{self.merchant.business_name} - {self.title} ({self.points_required} points)"
+    
+    @property
+    def is_expired(self):
+        if self.expiry_date:
+            return timezone.now() > self.expiry_date
+        return False
+
+
+class MerchantDealRequest(BaseModel):
+    """Model to track merchant deal requests"""
+    REQUEST_STATUS = (
+        ('pending', 'Pending'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+        ('cancelled', 'Cancelled'),
+    )
+    
+    requesting_merchant = models.ForeignKey(MerchantProfile, on_delete=models.CASCADE, related_name='deal_requests_made')
+    deal = models.ForeignKey(MerchantDeal, on_delete=models.CASCADE, related_name='deal_requests_received')
+    status = models.CharField(max_length=20, choices=REQUEST_STATUS, default='pending')
+    request_time = models.DateTimeField(auto_now_add=True)
+    
+    # Request details
+    message = models.TextField(blank=True, null=True)  # Merchant can add message
+    points_requested = models.DecimalField(max_digits=12, decimal_places=2)  # Points requested
+    counter_offer = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)  # Counter offer points
+    
+    class Meta:
+        unique_together = ('requesting_merchant', 'deal')  # One request per deal per merchant
+        ordering = ['-request_time']
+    
+    def __str__(self):
+        return f"{self.requesting_merchant.business_name} requests {self.deal.title} ({self.points_requested} points)"
+
+
+class MerchantDealConfirmation(BaseModel):
+    """Model for confirmed merchant deals"""
+    CONFIRMATION_STATUS = (
+        ('pending', 'Pending Confirmation'),
+        ('confirmed', 'Confirmed'),
+        ('cancelled', 'Cancelled'),
+        ('completed', 'Completed'),
+    )
+    
+    deal_request = models.OneToOneField(MerchantDealRequest, on_delete=models.CASCADE, related_name='confirmation')
+    deal = models.ForeignKey(MerchantDeal, on_delete=models.CASCADE, related_name='confirmations')
+    merchant1 = models.ForeignKey(MerchantProfile, on_delete=models.CASCADE, related_name='deals_offered')
+    merchant2 = models.ForeignKey(MerchantProfile, on_delete=models.CASCADE, related_name='deals_received')
+    
+    # Confirmation details
+    status = models.CharField(max_length=20, choices=CONFIRMATION_STATUS, default='pending')
+    confirmation_time = models.DateTimeField(null=True, blank=True)
+    completed_time = models.DateTimeField(null=True, blank=True)
+    
+    # Deal terms
+    points_exchanged = models.DecimalField(max_digits=12, decimal_places=2)  # Points exchanged
+    deal_terms = models.TextField(blank=True, null=True)  # Agreed terms
+    
+    # Communication
+    merchant1_notes = models.TextField(blank=True, null=True)
+    merchant2_notes = models.TextField(blank=True, null=True)
+    
+    class Meta:
+        ordering = ['-create_time']
+    
+    def __str__(self):
+        return f"Deal: {self.merchant1.business_name} ↔ {self.merchant2.business_name} ({self.points_exchanged} points)"
+    
+    def confirm_deal(self):
+        """Confirm the deal"""
+        self.status = 'confirmed'
+        self.confirmation_time = timezone.now()
+        self.save()
+    
+    def complete_deal(self):
+        """Mark deal as completed"""
+        self.status = 'completed'
+        self.completed_time = timezone.now()
+        self.save()
+
+
+class MerchantNotification(BaseModel):
+    """Model for merchant notifications"""
+    NOTIFICATION_TYPE = (
+        ('deal_request', 'Deal Request'),
+        ('deal_accepted', 'Deal Accepted'),
+        ('deal_rejected', 'Deal Rejected'),
+        ('deal_expired', 'Deal Expired'),
+        ('points_transfer', 'Points Transfer'),
+        ('system', 'System Notification'),
+    )
+    
+    merchant = models.ForeignKey(MerchantProfile, on_delete=models.CASCADE, related_name='notifications')
+    notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPE)
+    title = models.CharField(max_length=255)
+    message = models.TextField()
+    
+    # Related objects
+    deal = models.ForeignKey(MerchantDeal, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    confirmation = models.ForeignKey(MerchantDealConfirmation, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    
+    # Notification status
+    is_read = models.BooleanField(default=False)
+    read_time = models.DateTimeField(null=True, blank=True)
+    
+    # Action data
+    action_url = models.CharField(max_length=500, blank=True, null=True)
+    action_data = models.JSONField(default=dict, blank=True)
+    
+    class Meta:
+        ordering = ['-create_time']
+    
+    def __str__(self):
+        return f"{self.merchant.business_name} - {self.title}"
+    
+    def mark_as_read(self):
+        """Mark notification as read"""
+        self.is_read = True
+        self.read_time = timezone.now()
+        self.save()
+
+
+class DealPointUsage(BaseModel):
+    """Model to track how deal points are used"""
+    USAGE_TYPE = (
+        ('exchange', 'Point Exchange'),
+        ('discount', 'Discount Applied'),
+        ('transfer', 'Point Transfer'),
+    )
+    
+    deal = models.ForeignKey(MerchantDeal, on_delete=models.CASCADE, related_name='point_usages')
+    confirmation = models.ForeignKey(MerchantDealConfirmation, on_delete=models.CASCADE, related_name='point_usages')
+    from_merchant = models.ForeignKey(MerchantProfile, on_delete=models.CASCADE, related_name='points_used_from_deals')
+    to_merchant = models.ForeignKey(MerchantProfile, on_delete=models.CASCADE, related_name='points_received_from_deals')
+    
+    # Usage details
+    usage_type = models.CharField(max_length=20, choices=USAGE_TYPE)
+    points_used = models.DecimalField(max_digits=12, decimal_places=2)
+    usage_description = models.TextField(blank=True, null=True)
+    
+    # Transaction details
+    transaction_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
+    
+    class Meta:
+        ordering = ['-create_time']
+    
+    def __str__(self):
+        return f"Deal Usage: {self.from_merchant.business_name} → {self.to_merchant.business_name}: {self.points_used} points"
+    
+    def save(self, *args, **kwargs):
+        if not self.transaction_id:
+            self.transaction_id = f"DEAL_USAGE_{uuid.uuid4().hex[:8].upper()}"
+        super().save(*args, **kwargs)
+
+
+class MerchantPointsTransfer(BaseModel):
+    """Model for points transfer between merchants after successful deals"""
+    TRANSFER_STATUS = (
+        ('pending', 'Pending'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('cancelled', 'Cancelled'),
+    )
+    
+    confirmation = models.ForeignKey(MerchantDealConfirmation, on_delete=models.CASCADE, related_name='points_transfers')
+    from_merchant = models.ForeignKey(MerchantProfile, on_delete=models.CASCADE, related_name='points_sent')
+    to_merchant = models.ForeignKey(MerchantProfile, on_delete=models.CASCADE, related_name='points_received')
+    
+    # Transfer details
+    points_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    transfer_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    net_amount = models.DecimalField(max_digits=12, decimal_places=2)  # points_amount - transfer_fee
+    
+    # Status and timing
+    status = models.CharField(max_length=20, choices=TRANSFER_STATUS, default='pending')
+    transfer_time = models.DateTimeField(null=True, blank=True)
+    
+    # Transaction details
+    transaction_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
+    notes = models.TextField(blank=True, null=True)
+    
+    class Meta:
+        ordering = ['-create_time']
+    
+    def __str__(self):
+        return f"{self.from_merchant.business_name} → {self.to_merchant.business_name}: {self.points_amount} points"
+    
+    def complete_transfer(self):
+        """Complete the points transfer"""
+        try:
+            # Deduct points from sender
+            self.from_merchant.user.wallet.deduct_points(
+                self.points_amount,
+                f"Transfer to {self.to_merchant.business_name}",
+                self.transaction_id
+            )
+            
+            # Add points to receiver
+            self.to_merchant.user.wallet.add_points(
+                self.net_amount,  # Net amount after fees
+                f"Received from {self.from_merchant.business_name}",
+                self.transaction_id
+            )
+            
+            self.status = 'completed'
+            self.transfer_time = timezone.now()
+            self.save()
+            
+            return True
+        except Exception as e:
+            self.status = 'failed'
+            self.notes = f"Transfer failed: {str(e)}"
+            self.save()
+            return False

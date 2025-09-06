@@ -39,5 +39,33 @@ urlpatterns = [
     path("v1/wallet/razorpay/verify-payment/", api.RazorpayPaymentVerificationAPIView.as_view(), name="razorpay-verify-payment"),
     path("v1/wallet/razorpay/transactions/", api.RazorpayTransactionListView.as_view(), name="razorpay-transactions"),
     
+    # Merchant Deal System URLs
+    path("v1/merchant-deals/", api.MerchantDealViewSet.as_view({'get': 'list', 'post': 'create'}), name="merchant-deals"),
+    path("v1/merchant-deals/<int:pk>/", api.MerchantDealViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name="merchant-deal-detail"),
+    path("v1/merchant-deals/<int:pk>/activate/", api.MerchantDealViewSet.as_view({'post': 'activate'}), name="merchant-deal-activate"),
+    path("v1/merchant-deals/<int:pk>/deactivate/", api.MerchantDealViewSet.as_view({'post': 'deactivate'}), name="merchant-deal-deactivate"),
+    path("v1/merchant-deals/<int:pk>/usage-history/", api.MerchantDealViewSet.as_view({'get': 'usage_history'}), name="merchant-deal-usage-history"),
+    
+    path("v1/deal-discovery/", api.DealDiscoveryViewSet.as_view({'get': 'list'}), name="deal-discovery"),
+    path("v1/deal-discovery/by-points/", api.DealDiscoveryViewSet.as_view({'get': 'by_points'}), name="deal-discovery-by-points"),
+    
+    path("v1/deal-requests/", api.MerchantDealRequestViewSet.as_view({'get': 'list', 'post': 'create'}), name="deal-requests"),
+    path("v1/deal-requests/<int:pk>/", api.MerchantDealRequestViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name="deal-request-detail"),
+    path("v1/deal-requests/<int:pk>/accept/", api.MerchantDealRequestViewSet.as_view({'post': 'accept'}), name="deal-request-accept"),
+    path("v1/deal-requests/<int:pk>/reject/", api.MerchantDealRequestViewSet.as_view({'post': 'reject'}), name="deal-request-reject"),
+    
+    path("v1/deal-confirmations/", api.MerchantDealConfirmationViewSet.as_view({'get': 'list', 'post': 'create'}), name="deal-confirmations"),
+    path("v1/deal-confirmations/<int:pk>/", api.MerchantDealConfirmationViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name="deal-confirmation-detail"),
+    path("v1/deal-confirmations/<int:pk>/complete/", api.MerchantDealConfirmationViewSet.as_view({'post': 'complete'}), name="deal-confirmation-complete"),
+    path("v1/deal-confirmations/<int:pk>/usage-history/", api.MerchantDealConfirmationViewSet.as_view({'get': 'usage_history'}), name="deal-confirmation-usage-history"),
+    
+    path("v1/merchant-notifications/", api.MerchantNotificationViewSet.as_view({'get': 'list', 'post': 'create'}), name="merchant-notifications"),
+    path("v1/merchant-notifications/<int:pk>/", api.MerchantNotificationViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name="merchant-notification-detail"),
+    path("v1/merchant-notifications/<int:pk>/mark-read/", api.MerchantNotificationViewSet.as_view({'post': 'mark_read'}), name="merchant-notification-mark-read"),
+    path("v1/merchant-notifications/mark-all-read/", api.MerchantNotificationViewSet.as_view({'post': 'mark_all_read'}), name="merchant-notification-mark-all-read"),
+    path("v1/merchant-notifications/unread-count/", api.MerchantNotificationViewSet.as_view({'get': 'unread_count'}), name="merchant-notification-unread-count"),
+    
+    path("v1/deal-stats/", api.DealStatsViewSet.as_view({'get': 'list'}), name="deal-stats"),
+
     path("", include(router.urls))
 ]

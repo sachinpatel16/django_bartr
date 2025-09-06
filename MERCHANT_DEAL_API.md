@@ -2,16 +2,17 @@
 
 ## Overview
 
-This system allows merchants to create deals and match with other merchants through a Tinder-like swiping interface. Merchants can exchange wallet points for business deals.
+This system allows merchants to create deals with points and request deals from other merchants. When a deal is created, points are deducted from the merchant's wallet. Merchants can only use deal points between each other for exchanges and discounts.
 
 ## Core Features
 
-- **Deal Creation**: Merchants create deals with points requirements
-- **Deal Discovery**: Tinder-like interface to browse other merchants' deals
-- **Swipe System**: Right swipe (interested) or Left swipe (not interested)
-- **Matching**: Mutual interest creates a match
+- **Deal Creation**: Merchants create deals with points (deducted from wallet)
+- **Deal Discovery**: Browse other merchants' deals with point-based filtering
+- **Request System**: Request deals instead of swiping
+- **Deal Confirmation**: Accept/reject deal requests
 - **Points Transfer**: Automatic points transfer when deals are completed
-- **Notifications**: Real-time notifications for matches and actions
+- **Usage Tracking**: Complete audit trail of how deal points are used
+- **Notifications**: Real-time notifications for all actions
 
 ## API Endpoints
 
@@ -29,12 +30,10 @@ POST /api/v1/merchant-deals/
 {
   "title": "Electronics Exchange Deal",
   "description": "Exchange electronics for 2000 points",
-  "points_required": 2000.0,
+  "points_offered": 2000.0,
   "deal_value": 2500.0,
   "category": 1,
   "expiry_date": "2024-12-31T23:59:59Z",
-  "min_points": 1500.0,
-  "max_points": 2500.0,
   "preferred_cities": ["Mumbai", "Delhi"],
   "preferred_categories": [1, 2],
   "terms_conditions": "Valid for 30 days",
@@ -42,10 +41,18 @@ POST /api/v1/merchant-deals/
 }
 ```
 
+**Note:** Points are automatically deducted from merchant's wallet when deal is created.
+
 #### Get My Deals
 
 ```
 GET /api/v1/merchant-deals/
+```
+
+#### Get Deal Usage History
+
+```
+GET /api/v1/merchant-deals/{id}/usage-history/
 ```
 
 #### Activate/Deactivate Deal
@@ -55,7 +62,7 @@ POST /api/v1/merchant-deals/{id}/activate/
 POST /api/v1/merchant-deals/{id}/deactivate/
 ```
 
-### 2. Deal Discovery (Tinder Interface)
+### 2. Deal Discovery
 
 #### Get Available Deals
 
@@ -66,25 +73,24 @@ GET /api/v1/deal-discovery/
 **Query Parameters:**
 
 - `category`: Filter by category ID
-- `min_points`: Minimum points required
-- `max_points`: Maximum points required
-- `city`: Filter by city
-- `search_query`: Search in title, description, or business name
-- `page`: Page number for pagination
-- `page_size`: Items per page
+- `points_offered`: Filter by points offered
+- `merchant__city`: Filter by city
+- `search`: Search in title, description, or business name
 
-#### Get Random Deal for Swiping
+#### Get Deals by Points
 
 ```
-GET /api/v1/deal-discovery/random_deal/
+GET /api/v1/deal-discovery/by-points/?points=2000
 ```
 
-### 3. Merchant Swiping
+**Note:** Only shows deals with remaining points available.
 
-#### Swipe on a Deal
+### 3. Deal Requests
+
+#### Request a Deal
 
 ```
-POST /api/v1/merchant-swipes/
+POST /api/v1/deal-requests/
 ```
 
 **Request Body:**
@@ -92,51 +98,48 @@ POST /api/v1/merchant-swipes/
 ```json
 {
   "deal": 1,
-  "swipe_type": "right", // "right" or "left"
-  "notes": "Great deal!",
+  "points_requested": 2000.0,
+  "message": "I'm interested in this deal",
   "counter_offer": 1800.0 // Optional counter offer
 }
 ```
 
-#### Get My Swipes
+#### Get My Requests
 
 ```
-GET /api/v1/merchant-swipes/
+GET /api/v1/deal-requests/
 ```
 
-### 4. Merchant Matches
-
-#### Get My Matches
+#### Accept Request
 
 ```
-GET /api/v1/merchant-matches/
+POST /api/v1/deal-requests/{id}/accept/
 ```
 
-#### Accept Match
+#### Reject Request
 
 ```
-POST /api/v1/merchant-matches/{id}/accept/
+POST /api/v1/deal-requests/{id}/reject/
 ```
 
-**Request Body:**
+### 4. Deal Confirmations
 
-```json
-{
-  "notes": "Looking forward to the deal!",
-  "agreed_points": 2000.0
-}
-```
-
-#### Reject Match
+#### Get My Confirmations
 
 ```
-POST /api/v1/merchant-matches/{id}/reject/
+GET /api/v1/deal-confirmations/
 ```
 
-#### Complete Match
+#### Complete Deal
 
 ```
-POST /api/v1/merchant-matches/{id}/complete/
+POST /api/v1/deal-confirmations/{id}/complete/
+```
+
+#### Get Usage History
+
+```
+GET /api/v1/deal-confirmations/{id}/usage-history/
 ```
 
 ### 5. Notifications
@@ -179,11 +182,10 @@ GET /api/v1/deal-stats/
 {
   "total_deals": 5,
   "active_deals": 3,
-  "total_matches": 8,
+  "total_requests": 8,
   "successful_deals": 4,
-  "total_points_transferred": 8000.0,
-  "points_sent": 4000.0,
-  "points_received": 4000.0
+  "total_points_offered": 10000.0,
+  "total_points_used": 6000.0
 }
 ```
 
@@ -198,11 +200,13 @@ POST /api/v1/merchant-deals/
 {
     "title": "Mobile Accessories Deal",
     "description": "Get mobile accessories for 1500 points",
-    "points_required": 1500.00,
+    "points_offered": 1500.00,
     "deal_value": 2000.00,
     "category": 1
 }
 ```
+
+_Note: 1500 points deducted from Apple's wallet_
 
 **Samsung Merchant:**
 
@@ -211,60 +215,52 @@ POST /api/v1/merchant-deals/
 {
     "title": "Electronics Exchange",
     "description": "Exchange electronics for 2000 points",
-    "points_required": 2000.00,
+    "points_offered": 2000.00,
     "deal_value": 2500.00,
     "category": 1
 }
 ```
 
-### Step 2: Discovery & Swiping
+_Note: 2000 points deducted from Samsung's wallet_
 
-**Apple swipes right on Samsung's deal:**
+### Step 2: Discovery & Request
+
+**Apple discovers Samsung's deal:**
+
+```bash
+GET /api/v1/deal-discovery/by-points/?points=2000
+```
+
+**Apple requests Samsung's deal:**
 
 ```json
-POST /api/v1/merchant-swipes/
+POST /api/v1/deal-requests/
 {
     "deal": 2,
-    "swipe_type": "right",
-    "notes": "Great electronics deal!"
+    "points_requested": 2000.00,
+    "message": "Great electronics deal! I'm interested."
 }
 ```
 
-**Samsung swipes right on Apple's deal:**
+### Step 3: Deal Confirmation
+
+**Samsung accepts the request:**
 
 ```json
-POST /api/v1/merchant-swipes/
-{
-    "deal": 1,
-    "swipe_type": "right",
-    "notes": "Mobile accessories needed!"
-}
+POST /api/v1/deal-requests/{request_id}/accept/
 ```
 
-### Step 3: Match Created
+_System creates deal confirmation and marks 2000 points as used in Samsung's deal_
 
-System automatically creates a match and sends notifications to both merchants.
-
-### Step 4: Accept Match
-
-**Samsung accepts the match:**
-
-```json
-POST /api/v1/merchant-matches/{match_id}/accept/
-{
-    "agreed_points": 2000.00
-}
-```
-
-### Step 5: Complete Deal
+### Step 4: Complete Deal
 
 **Either merchant completes the deal:**
 
 ```json
-POST /api/v1/merchant-matches/{match_id}/complete/
+POST /api/v1/deal-confirmations/{confirmation_id}/complete/
 ```
 
-System automatically transfers 2000 points from Samsung to Apple and marks the match as completed.
+_System transfers 2000 points from Samsung to Apple and tracks usage_
 
 ## Data Models
 
@@ -273,49 +269,62 @@ System automatically transfers 2000 points from Samsung to Apple and marks the m
 - `merchant`: ForeignKey to MerchantProfile
 - `title`: Deal title
 - `description`: Deal description
-- `points_required`: Points needed for deal
+- `points_offered`: Points offered by merchant (deducted from wallet)
+- `points_used`: Points used from this deal
+- `points_remaining`: Remaining points available
 - `deal_value`: Actual value of deal
 - `category`: Deal category
-- `status`: Active/Inactive/Expired/Completed
+- `status`: Active/Inactive/Expired/Completed/Cancelled
 - `expiry_date`: When deal expires
-- `min_points`/`max_points`: Point range
 - `preferred_cities`: Preferred cities for deal
 - `preferred_categories`: Preferred business categories
 - `terms_conditions`: Deal terms
 - `is_negotiable`: Whether points are negotiable
 
-### MerchantSwipe
+### MerchantDealRequest
 
-- `merchant`: Merchant who swiped
-- `deal`: Deal being swiped on
-- `swipe_type`: Right (interested) or Left (not interested)
-- `swipe_time`: When swipe occurred
-- `notes`: Additional notes
+- `requesting_merchant`: Merchant requesting the deal
+- `deal`: Deal being requested
+- `status`: Pending/Accepted/Rejected/Cancelled
+- `request_time`: When request was made
+- `message`: Request message
+- `points_requested`: Points requested
 - `counter_offer`: Optional counter offer points
 
-### MerchantMatch
+### MerchantDealConfirmation
 
-- `deal`: The deal being matched
+- `deal_request`: Related deal request
+- `deal`: The deal being confirmed
 - `merchant1`: Deal creator
-- `merchant2`: Merchant who swiped right
-- `status`: Pending/Accepted/Rejected/Expired/Completed
-- `agreed_points`: Final agreed points
+- `merchant2`: Merchant who requested
+- `status`: Pending Confirmation/Confirmed/Cancelled/Completed
+- `points_exchanged`: Points exchanged
 - `deal_terms`: Agreed terms
 - `merchant1_notes`/`merchant2_notes`: Communication notes
+
+### DealPointUsage
+
+- `deal`: Related deal
+- `confirmation`: Related confirmation
+- `from_merchant`/`to_merchant`: Usage parties
+- `usage_type`: Exchange/Discount/Transfer
+- `points_used`: Points used
+- `usage_description`: Description of usage
+- `transaction_id`: Unique transaction ID
 
 ### MerchantNotification
 
 - `merchant`: Merchant receiving notification
-- `notification_type`: Type of notification
+- `notification_type`: Deal Request/Accepted/Rejected/Points Transfer/System
 - `title`: Notification title
 - `message`: Notification message
-- `deal`/`match`: Related objects
+- `deal`/`confirmation`: Related objects
 - `is_read`: Read status
 - `action_url`: URL for action
 
 ### MerchantPointsTransfer
 
-- `match`: Related match
+- `confirmation`: Related deal confirmation
 - `from_merchant`/`to_merchant`: Transfer parties
 - `points_amount`: Points being transferred
 - `transfer_fee`: Transfer fees
@@ -345,15 +354,15 @@ Standard HTTP status codes are used:
 ## Rate Limiting
 
 - Standard rate limiting applies
-- Swipe operations are limited to prevent spam
+- Deal request operations are limited to prevent spam
 - Deal creation is limited per merchant
 
 ## Webhook Notifications
 
 For real-time updates, webhooks can be configured for:
 
-- New matches
-- Match status changes
+- New deal requests
+- Deal confirmations
 - Points transfers
 - Deal expirations
 
@@ -362,11 +371,12 @@ For real-time updates, webhooks can be configured for:
 Use the provided test data and endpoints to test the complete flow:
 
 1. Create test merchants
-2. Create test deals
-3. Test swiping functionality
-4. Verify matching system
-5. Test points transfer
-6. Verify notifications
+2. Create test deals (verify points deduction)
+3. Test deal discovery and filtering
+4. Test deal request system
+5. Test deal confirmation and completion
+6. Verify points transfer and usage tracking
+7. Verify notifications
 
 ## Support
 

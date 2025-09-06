@@ -7,7 +7,8 @@ from django.db.models.functions import TruncDate
 
 from freelancing.custom_auth.models import (ApplicationUser, MultiToken,
                                             UserActivity, CustomPermission,
-                                            MerchantProfile, Wallet, Category, WalletHistory, SiteSetting, RazorpayTransaction)
+                                            MerchantProfile, Wallet, Category, WalletHistory, SiteSetting, RazorpayTransaction,
+                                            MerchantDeal, MerchantDealRequest, MerchantDealConfirmation, MerchantNotification, MerchantPointsTransfer, DealPointUsage)
 from freelancing.voucher.models import Voucher
 
 # Custom Admin Site Configuration
@@ -383,3 +384,125 @@ class UserAdmin(UserAdmin):
 
     is_online.boolean = True
     is_online.admin_order_field = "is_online"
+
+# Merchant Deal System Admin
+@admin.register(MerchantDeal)
+class MerchantDealAdmin(admin.ModelAdmin):
+    list_display = ['title', 'merchant', 'points_offered', 'points_used', 'points_remaining', 'deal_value', 'status', 'create_time']
+    list_filter = ['status', 'category', 'create_time', 'expiry_date']
+    search_fields = ['title', 'description', 'merchant__business_name']
+    readonly_fields = ['points_used', 'points_remaining', 'create_time', 'update_time']
+    list_editable = ['status']
+    
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('merchant', 'title', 'description', 'category')
+        }),
+        ('Deal Details', {
+            'fields': ('points_offered', 'points_used', 'points_remaining', 'deal_value')
+        }),
+        ('Preferences', {
+            'fields': ('preferred_cities', 'preferred_categories', 'terms_conditions', 'is_negotiable')
+        }),
+        ('Status & Timing', {
+            'fields': ('status', 'expiry_date', 'create_time', 'update_time')
+        }),
+    )
+
+
+@admin.register(MerchantDealRequest)
+class MerchantDealRequestAdmin(admin.ModelAdmin):
+    list_display = ['requesting_merchant', 'deal', 'status', 'points_requested', 'request_time']
+    list_filter = ['status']
+    search_fields = ['requesting_merchant__business_name', 'deal__title']
+    readonly_fields = ['request_time']
+    ordering = ['-request_time']
+    
+    fieldsets = (
+        ('Request Information', {
+            'fields': ('requesting_merchant', 'deal', 'status')
+        }),
+        ('Request Details', {
+            'fields': ('points_requested', 'counter_offer', 'message')
+        }),
+        ('Timing', {
+            'fields': ('request_time',)
+        }),
+    )
+
+
+@admin.register(MerchantDealConfirmation)
+class MerchantDealConfirmationAdmin(admin.ModelAdmin):
+    list_display = ['deal', 'merchant1', 'merchant2', 'status', 'points_exchanged', 'create_time']
+    list_filter = ['status', 'create_time']
+    search_fields = ['deal__title', 'merchant1__business_name', 'merchant2__business_name']
+    readonly_fields = ['completed_time']
+    ordering = ['-create_time']
+    
+    fieldsets = (
+        ('Confirmation Information', {
+            'fields': ('deal_request', 'deal', 'merchant1', 'merchant2', 'status')
+        }),
+        ('Deal Terms', {
+            'fields': ('points_exchanged', 'deal_terms')
+        }),
+        ('Communication', {
+            'fields': ('merchant1_notes', 'merchant2_notes')
+        }),
+        ('Timing', {
+            'fields': ('confirmation_time', 'completed_time')
+        }),
+    )
+
+
+@admin.register(DealPointUsage)
+class DealPointUsageAdmin(admin.ModelAdmin):
+    list_display = ['deal', 'from_merchant', 'to_merchant', 'usage_type', 'points_used', 'create_time']
+    list_filter = ['usage_type']
+    search_fields = ['deal__title', 'from_merchant__business_name', 'to_merchant__business_name', 'transaction_id']
+    readonly_fields = ['transaction_id', 'create_time']
+    ordering = ['-create_time']
+    
+    fieldsets = (
+        ('Usage Information', {
+            'fields': ('deal', 'confirmation', 'from_merchant', 'to_merchant')
+        }),
+        ('Usage Details', {
+            'fields': ('usage_type', 'points_used', 'usage_description')
+        }),
+        ('Transaction', {
+            'fields': ('transaction_id', 'create_time')
+        }),
+    )
+
+
+@admin.register(MerchantNotification)
+class MerchantNotificationAdmin(admin.ModelAdmin):
+    list_display = ['merchant', 'notification_type', 'title', 'is_read', 'create_time']
+    list_filter = ['notification_type', 'is_read', 'create_time']
+    search_fields = ['merchant__business_name', 'title', 'message']
+    readonly_fields = ['create_time', 'read_time']
+    list_editable = ['is_read']
+
+
+@admin.register(MerchantPointsTransfer)
+class MerchantPointsTransferAdmin(admin.ModelAdmin):
+    list_display = ['from_merchant', 'to_merchant', 'points_amount', 'status', 'transfer_time']
+    list_filter = ['status', 'transfer_time']
+    search_fields = ['from_merchant__business_name', 'to_merchant__business_name', 'transaction_id']
+    readonly_fields = ['transfer_time', 'create_time']
+    
+    fieldsets = (
+        ('Transfer Details', {
+            'fields': ('confirmation', 'from_merchant', 'to_merchant', 'points_amount')
+        }),
+        ('Fees & Net Amount', {
+            'fields': ('transfer_fee', 'net_amount')
+        }),
+        ('Status & Timing', {
+            'fields': ('status', 'transfer_time', 'transaction_id')
+        }),
+        ('Additional Info', {
+            'fields': ('notes', 'create_time')
+        }),
+    )

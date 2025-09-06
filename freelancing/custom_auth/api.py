@@ -6,7 +6,7 @@ import uuid
 from typing import Type
 from decimal import Decimal
 
-from django.db.models import Q
+from django.db.models import Q, Sum
 from rest_framework.exceptions import PermissionDenied
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
@@ -23,7 +23,7 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.filters import SearchFilter
 from rest_framework.parsers import (FileUploadParser, FormParser,
                                     MultiPartParser)
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.serializers import BaseSerializer
 from rest_framework.status import HTTP_200_OK
@@ -34,7 +34,9 @@ from templated_email import send_templated_mail
 
 from freelancing.custom_auth.models import (ApplicationUser, LoginOtp, CustomBlacklistedToken,
                                          CustomPermission, Wallet, MerchantProfile, Category,
-                                        WalletHistory, RazorpayTransaction)
+                                        WalletHistory, RazorpayTransaction, MerchantDeal, 
+                                        MerchantDealRequest, MerchantDealConfirmation, 
+                                        MerchantNotification, MerchantPointsTransfer, DealPointUsage)
 from freelancing.custom_auth.permissions import IsSelf
 from freelancing.custom_auth.serializers import (BaseUserSerializer,
                                                 ChangePasswordSerializer,
@@ -46,7 +48,10 @@ from freelancing.custom_auth.serializers import (BaseUserSerializer,
                                                 UserPasswordResetSerializer, MerchantProfileSerializer, WalletSerializer,
                                                 CategorySerializer, WalletHistorySerializer, MerchantListingSerializer,
                                                 RazorpayOrderSerializer, RazorpayPaymentVerificationSerializer,
-                                                RazorpayTransactionSerializer
+                                                RazorpayTransactionSerializer, MerchantDealSerializer, 
+                                                MerchantDealCreateSerializer, MerchantDealRequestSerializer, 
+                                                MerchantDealConfirmationSerializer, MerchantNotificationSerializer,
+                                                MerchantPointsTransferSerializer, DealPointUsageSerializer, DealStatsSerializer
                                             )
 # from trade_time_accounting.notification.FCM_manager import unsubscribe_from_topic
 from freelancing.registrations.serializers import CheckOtp
@@ -801,9 +806,9 @@ class RazorpayWalletAPIView(APIView):
                     'currency': order_data['currency'],
                     'receipt': order_data['receipt'],
                     'transaction_id': transaction.id,
-                    'razorpay_key_id': settings.RAZORPAY_KEY_ID
-                },
-                'auto_fill': auto_fill_data
+                    'razorpay_key_id': settings.RAZORPAY_KEY_ID,
+                    'auto_fill': auto_fill_data
+                }
             }, status=status.HTTP_201_CREATED)
             
         except Exception as e:
@@ -909,3 +914,378 @@ class RazorpayTransactionListView(generics.ListAPIView):
             return RazorpayTransaction.objects.filter(user=user)
         # Return empty queryset for unauthenticated requests or during inspection
         return RazorpayTransaction.objects.none()
+
+# Merchant Deal System APIs
+class MerchantDealViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing merchant deals
+    """
+    serializer_class = MerchantDealSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = (DjangoFilterBackend, SearchFilter)
+    search_fields = ['title', 'description']
+    filterset_fields = ['status', 'category', 'points_offered']
+    
+    def get_queryset(self):
+        user = self.request.user
+        if hasattr(user, 'merchant_profile'):
+            return MerchantDeal.objects.filter(merchant=user.merchant_profile)
+        return MerchantDeal.objects.none()
+    
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return MerchantDealCreateSerializer
+        return MerchantDealSerializer
+    
+    def perform_create(self, serializer):
+        serializer.save(merchant=self.request.user.merchant_profile)
+    
+    @action(detail=True, methods=['post'])
+    def activate(self, request, pk=None):
+        """Activate a deal"""
+        deal = self.get_object()
+        deal.status = 'active'
+        deal.save()
+        return Response({'message': 'Deal activated successfully'})
+    
+    @action(detail=True, methods=['post'])
+    def deactivate(self, request, pk=None):
+        """Deactivate a deal"""
+        deal = self.get_object()
+        deal.status = 'inactive'
+        deal.save()
+        return Response({'message': 'Deal deactivated successfully'})
+    
+    @action(detail=True, methods=['get'])
+    def usage_history(self, request, pk=None):
+        """Get deal point usage history"""
+        deal = self.get_object()
+        usages = DealPointUsage.objects.filter(deal=deal)
+        serializer = DealPointUsageSerializer(usages, many=True, context={'request': request})
+        return Response(serializer.data)
+
+
+class DealDiscoveryViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet for discovering deals with point-based filtering
+    """
+    serializer_class = MerchantDealSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = (DjangoFilterBackend, SearchFilter)
+    search_fields = ['title', 'description', 'merchant__business_name']
+    filterset_fields = ['category', 'points_offered', 'merchant__city']
+    
+    def get_queryset(self):
+        user = self.request.user
+        if not hasattr(user, 'merchant_profile'):
+            return MerchantDeal.objects.none()
+        
+        # Get deals from other merchants only with remaining points
+        queryset = MerchantDeal.objects.filter(
+            status='active',
+            merchant__user__is_active=True,
+            points_remaining__gt=0  # Only show deals with remaining points
+        ).exclude(
+            merchant=user.merchant_profile
+        )
+        
+        # Apply additional filters
+        min_points = self.request.query_params.get('min_points')
+        max_points = self.request.query_params.get('max_points')
+        
+        if min_points:
+            queryset = queryset.filter(points_offered__gte=min_points)
+        
+        if max_points:
+            queryset = queryset.filter(points_offered__lte=max_points)
+        
+        return queryset.order_by('-create_time')
+    
+    @action(detail=False, methods=['get'])
+    def by_points(self, request):
+        """Get deals filtered by specific point range"""
+        points = request.query_params.get('points')
+        if not points:
+            return Response({'error': 'Points parameter is required'}, status=400)
+        
+        try:
+            points = float(points)
+            queryset = self.get_queryset().filter(
+                points_offered__lte=points,
+                points_remaining__gte=points
+            )
+            serializer = self.get_serializer(queryset, many=True)
+            return Response(serializer.data)
+        except ValueError:
+            return Response({'error': 'Invalid points value'}, status=400)
+
+
+class MerchantDealRequestViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for merchant deal requests
+    """
+    serializer_class = MerchantDealRequestSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = (DjangoFilterBackend, SearchFilter)
+    filterset_fields = ['status', 'deal__category', 'points_requested']
+    
+    def get_queryset(self):
+        user = self.request.user
+        if hasattr(user, 'merchant_profile'):
+            return MerchantDealRequest.objects.filter(requesting_merchant=user.merchant_profile)
+        return MerchantDealRequest.objects.none()
+    
+    def perform_create(self, serializer):
+        request_obj = serializer.save(requesting_merchant=self.request.user.merchant_profile)
+        
+        # Send notification to deal creator
+        MerchantNotification.objects.create(
+            merchant=request_obj.deal.merchant,
+            notification_type='deal_request',
+            title='New Deal Request!',
+            message=f'{request_obj.requesting_merchant.business_name} requested your deal "{request_obj.deal.title}"',
+            deal=request_obj.deal,
+            action_url=f'/merchant/deal-requests/{request_obj.id}/'
+        )
+    
+    @action(detail=True, methods=['post'])
+    def accept(self, request, pk=None):
+        """Accept a deal request"""
+        deal_request = self.get_object()
+        user = request.user.merchant_profile
+        
+        # Only deal creator can accept
+        if deal_request.deal.merchant != user:
+            return Response({'error': 'Only deal creator can accept requests'}, status=403)
+        
+        if deal_request.status != 'pending':
+            return Response({'error': 'Request is not pending'}, status=400)
+        
+        # Create deal confirmation
+        confirmation = MerchantDealConfirmation.objects.create(
+            deal_request=deal_request,
+            deal=deal_request.deal,
+            merchant1=deal_request.deal.merchant,
+            merchant2=deal_request.requesting_merchant,
+            points_exchanged=deal_request.points_requested,
+            status='confirmed',
+            confirmation_time=timezone.now()
+        )
+        
+        # Update deal points
+        deal = deal_request.deal
+        deal.points_used += deal_request.points_requested
+        deal.save()
+        
+        # Update request status
+        deal_request.status = 'accepted'
+        deal_request.save()
+        
+        # Send notification to requester
+        MerchantNotification.objects.create(
+            merchant=deal_request.requesting_merchant,
+            notification_type='deal_accepted',
+            title='Deal Request Accepted!',
+            message=f'{deal_request.deal.merchant.business_name} accepted your deal request',
+            deal=deal_request.deal,
+            action_url=f'/merchant/deal-confirmations/{confirmation.id}/'
+        )
+        
+        return Response({'message': 'Deal request accepted successfully'})
+    
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        """Reject a deal request"""
+        deal_request = self.get_object()
+        user = request.user.merchant_profile
+        
+        # Only deal creator can reject
+        if deal_request.deal.merchant != user:
+            return Response({'error': 'Only deal creator can reject requests'}, status=403)
+        
+        if deal_request.status != 'pending':
+            return Response({'error': 'Request is not pending'}, status=400)
+        
+        deal_request.status = 'rejected'
+        deal_request.save()
+        
+        # Send notification to requester
+        MerchantNotification.objects.create(
+            merchant=deal_request.requesting_merchant,
+            notification_type='deal_rejected',
+            title='Deal Request Rejected',
+            message=f'{deal_request.deal.merchant.business_name} rejected your deal request',
+            deal=deal_request.deal
+        )
+        
+        return Response({'message': 'Deal request rejected successfully'})
+
+
+class MerchantDealConfirmationViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing merchant deal confirmations
+    """
+    serializer_class = MerchantDealConfirmationSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = (DjangoFilterBackend, SearchFilter)
+    filterset_fields = ['status', 'points_exchanged']
+    
+    def get_queryset(self):
+        user = self.request.user
+        if hasattr(user, 'merchant_profile'):
+            return MerchantDealConfirmation.objects.filter(
+                Q(merchant1=user.merchant_profile) | Q(merchant2=user.merchant_profile)
+            )
+        return MerchantDealConfirmation.objects.none()
+    
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        """Complete a deal and transfer points"""
+        confirmation = self.get_object()
+        user = request.user.merchant_profile
+        
+        if confirmation.status == 'confirmed' and (confirmation.merchant1 == user or confirmation.merchant2 == user):
+            # Create points transfer
+            transfer = MerchantPointsTransfer.objects.create(
+                confirmation=confirmation,
+                from_merchant=confirmation.merchant1,
+                to_merchant=confirmation.merchant2,
+                points_amount=confirmation.points_exchanged,
+                transfer_fee=Decimal('0.00'),  # No fees for now
+                net_amount=confirmation.points_exchanged,
+                transaction_id=f"TRF_{uuid.uuid4().hex[:8].upper()}"
+            )
+            
+            # Complete the transfer
+            if transfer.complete_transfer():
+                confirmation.complete_deal()
+                
+                # Create deal point usage record
+                DealPointUsage.objects.create(
+                    deal=confirmation.deal,
+                    confirmation=confirmation,
+                    from_merchant=confirmation.merchant1,
+                    to_merchant=confirmation.merchant2,
+                    usage_type='exchange',
+                    points_used=confirmation.points_exchanged,
+                    usage_description=f"Point exchange between {confirmation.merchant1.business_name} and {confirmation.merchant2.business_name}"
+                )
+                
+                # Send notifications
+                MerchantNotification.objects.create(
+                    merchant=confirmation.merchant1,
+                    notification_type='points_transfer',
+                    title='Points Transfer Completed',
+                    message=f'{confirmation.points_exchanged} points transferred to {confirmation.merchant2.business_name}',
+                    deal=confirmation.deal
+                )
+                
+                MerchantNotification.objects.create(
+                    merchant=confirmation.merchant2,
+                    notification_type='points_transfer',
+                    title='Points Received',
+                    message=f'You received {confirmation.points_exchanged} points from {confirmation.merchant1.business_name}',
+                    deal=confirmation.deal
+                )
+                
+                return Response({'message': 'Deal completed and points transferred successfully'})
+            else:
+                return Response({'error': 'Points transfer failed'}, status=500)
+        else:
+            return Response({'error': 'Cannot complete this deal'}, status=400)
+    
+    @action(detail=True, methods=['get'])
+    def usage_history(self, request, pk=None):
+        """Get deal point usage history"""
+        confirmation = self.get_object()
+        usages = DealPointUsage.objects.filter(confirmation=confirmation)
+        serializer = DealPointUsageSerializer(usages, many=True, context={'request': request})
+        return Response(serializer.data)
+
+
+class MerchantNotificationViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for merchant notifications
+    """
+    serializer_class = MerchantNotificationSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        user = self.request.user
+        if hasattr(user, 'merchant_profile'):
+            return MerchantNotification.objects.filter(merchant=user.merchant_profile)
+        return MerchantNotification.objects.none()
+    
+    @action(detail=True, methods=['post'])
+    def mark_read(self, request, pk=None):
+        """Mark notification as read"""
+        notification = self.get_object()
+        notification.mark_as_read()
+        return Response({'message': 'Notification marked as read'})
+    
+    @action(detail=False, methods=['post'])
+    def mark_all_read(self, request):
+        """Mark all notifications as read"""
+        user = request.user.merchant_profile
+        MerchantNotification.objects.filter(
+            merchant=user,
+            is_read=False
+        ).update(is_read=True, read_time=timezone.now())
+        return Response({'message': 'All notifications marked as read'})
+    
+    @action(detail=False, methods=['get'])
+    def unread_count(self, request):
+        """Get count of unread notifications"""
+        user = request.user.merchant_profile
+        count = MerchantNotification.objects.filter(
+            merchant=user,
+            is_read=False
+        ).count()
+        return Response({'unread_count': count})
+
+
+class DealStatsViewSet(viewsets.ViewSet):
+    """
+    ViewSet for deal statistics
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def list(self, request):
+        """Get overall deal statistics"""
+        user = request.user
+        if not hasattr(user, 'merchant_profile'):
+            return Response({'error': 'Merchant profile not found'}, status=404)
+        
+        merchant_profile = user.merchant_profile
+        
+        # Calculate statistics
+        total_deals = MerchantDeal.objects.filter(merchant=merchant_profile).count()
+        active_deals = MerchantDeal.objects.filter(merchant=merchant_profile, status='active').count()
+        total_requests = MerchantDealRequest.objects.filter(
+            Q(deal__merchant=merchant_profile) | Q(requesting_merchant=merchant_profile)
+        ).count()
+        successful_deals = MerchantDealConfirmation.objects.filter(
+            Q(merchant1=merchant_profile) | Q(merchant2=merchant_profile),
+            status='completed'
+        ).count()
+        
+        # Calculate total points offered and used
+        total_points_offered = MerchantDeal.objects.filter(
+            merchant=merchant_profile
+        ).aggregate(total=Sum('points_offered'))['total'] or Decimal('0.00')
+        
+        total_points_used = MerchantDeal.objects.filter(
+            merchant=merchant_profile
+        ).aggregate(total=Sum('points_used'))['total'] or Decimal('0.00')
+        
+        data = {
+            'total_deals': total_deals,
+            'active_deals': active_deals,
+            'total_requests': total_requests,
+            'successful_deals': successful_deals,
+            'total_points_offered': total_points_offered,
+            'total_points_used': total_points_used
+        }
+        
+        serializer = DealStatsSerializer(data)
+        return Response(serializer.data)
